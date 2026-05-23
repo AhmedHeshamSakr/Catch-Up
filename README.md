@@ -29,6 +29,22 @@ NewsCatchUpPipeline (ADK SequentialAgent)
 ADK · Gemini (AI Studio → Vertex) · FastAPI · SQLite → Firestore · APScheduler → Cloud Scheduler ·
 Next.js + shadcn/ui + Tailwind.
 
+## Running locally
+
+```bash
+uv sync                                   # install deps
+uv run pytest tests -q                    # run the test suite (no API key needed)
+uv run --extra lint ruff check app tests  # lint
+
+# Run a digest (collects RSS → enriches with Gemini → writes output/digest-<id>.md)
+# Requires a Google AI Studio key for the LLM enrichment + narrative:
+export GOOGLE_API_KEY=...   # or put it in .env (gitignored)
+uv run python -m app.cli run
+```
+
+Sources live in `config/sources.yaml`; importance-boost entities/keywords in `config/watchlist.yaml`.
+Without a key, collection/dedup/storage still run and the digest degrades gracefully (items unenriched).
+
 ## License
 
 Private.
