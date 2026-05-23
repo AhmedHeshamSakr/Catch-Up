@@ -4,6 +4,7 @@ from app import runner
 from app.adapters.storage.sqlite_backend import SqliteBackend
 from app.core.config import Settings
 from app.core.domain import Category, RawItem, RunStatus, SourceType
+from app.pipeline.schema import ProcessingResult
 
 
 def _raw(url: str, title: str) -> RawItem:
@@ -34,7 +35,11 @@ def test_run_digest_end_to_end(tmp_path, monkeypatch):
         lambda source: [_raw("https://x.com/1", "A"), _raw("https://x.com/2", "B")],
     )
 
-    run = runner.run_digest(settings=settings)
+    run = runner.run_digest(
+        settings=settings,
+        processor=lambda items: ProcessingResult(items=[]),
+        narrator=lambda items: "",
+    )
 
     assert run.status == RunStatus.SUCCESS
     assert run.collected == 2
@@ -68,7 +73,11 @@ def test_run_digest_isolates_source_failure(tmp_path, monkeypatch):
         raise RuntimeError("feed down")
 
     monkeypatch.setattr(runner.rss, "collect", boom)
-    run = runner.run_digest(settings=settings)
+    run = runner.run_digest(
+        settings=settings,
+        processor=lambda items: ProcessingResult(items=[]),
+        narrator=lambda items: "",
+    )
 
     assert run.status == RunStatus.PARTIAL
     assert run.collected == 0
@@ -104,7 +113,11 @@ def test_run_digest_failed_run_finalized_on_unexpected_error(tmp_path, monkeypat
     )
 
     with pytest.raises(RuntimeError, match="render boom"):
-        runner.run_digest(settings=settings)
+        runner.run_digest(
+            settings=settings,
+            processor=lambda items: ProcessingResult(items=[]),
+            narrator=lambda items: "",
+        )
 
     # The run must exist in storage and be marked FAILED
     storage = SqliteBackend(settings.sqlite_path)
