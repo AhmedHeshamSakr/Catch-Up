@@ -116,6 +116,11 @@ Executed subagent-driven on `feat/sources` (implementer per batch + spec/quality
 - **Live GNews smoke:** `newsapi.collect` with a real key returned 10 current AI headlines (title + source + URL). API path validated.
 - **Result:** `uv run pytest tests -q` → **52 passed**; `uv run --extra lint ruff check app tests scripts` → clean. `run_digest` now collects from RSS + GNews + scraped pages. All commits authored solely by AhmedHeshamSakr.
 
+### Phase: Pivot — quota wall → API + Console (planning)
+- **PR #4 merged → `main`.** Started a Plan 5 (search-grounding) spike to learn ADK's `google_search` grounding-metadata shape; confirmed `from google.adk.tools import google_search` imports, but hit **Gemini `429 RESOURCE_EXHAUSTED`** — AI Studio free-tier quota exhausted for the day. Live LLM validation blocked until reset.
+- **Decision (with Ahmed):** pivot to **quota-free** work — the **FastAPI API** then the **Next.js console** (both operate on stored data + config; only "Run now" needs Gemini). Search-grounding + the `run_async` migration deferred until quota resets.
+- Reused the branch as `feat/api`. Wrote **Plan 5 — FastAPI API** → `docs/superpowers/plans/2026-05-24-plan5-api.md`: extend storage with `list_runs`/filterable `list_news`; `config_store` (sources/watchlist write); `create_app()` factory with CORS + `/api` router (health, dashboard, runs, news, sources/watchlist CRUD, run trigger); `catchup serve` CLI. TestClient TDD; run trigger injected so tests need no Gemini quota.
+- **Roadmap now:** Plan 5 API · Plan 6 Next.js console · Plan 7 search-grounding + async · Plan 8 orchestration (ADK agent tree) · Plan 9 GCP prod.
+
 ### Next
-- **PR #4 open** → https://github.com/AhmedHeshamSakr/Catch-Up/pull/4 (`feat/sources` → `main`), awaiting review/merge.
-- After merge → **Plan 5 — Google Search grounding collector** (ADK grounding-metadata spike) + migrate sync `runner.run` → `run_async`.
+- Execute Plan 5 (API) subagent-driven — fully quota-free.
