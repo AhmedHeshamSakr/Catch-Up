@@ -117,5 +117,5 @@ Executed subagent-driven on `feat/sources` (implementer per batch + spec/quality
 - **Result:** `uv run pytest tests -q` → **52 passed**; `uv run --extra lint ruff check app tests scripts` → clean. `run_digest` now collects from RSS + GNews + scraped pages. All commits authored solely by AhmedHeshamSakr.
 
 ### Next
-- Integrate `feat/sources` → `main` (PR #4).
-- Plan 5 — Google Search grounding collector (ADK grounding-metadata spike) + migrate sync `runner.run` → `run_async`.
+- **PR #4 open** → https://github.com/AhmedHeshamSakr/Catch-Up/pull/4 (`feat/sources` → `main`), awaiting review/merge.
+- After merge → **Plan 5 — Google Search grounding collector** (ADK grounding-metadata spike) + migrate sync `runner.run` → `run_async`.
