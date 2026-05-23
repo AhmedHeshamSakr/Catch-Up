@@ -102,5 +102,5 @@ Executed subagent-driven on `feat/outputs` (implementer per batch + spec/quality
 - **Result:** `uv run pytest tests -q` → **36 passed**; `uv run --extra lint ruff check app tests scripts` → clean; `uv run python scripts/render_smoke.py` → `output/digest-smoke01.{md,xlsx,html}`. Each `run_digest` now emits all three formats. All commits authored solely by AhmedHeshamSakr.
 
 ### Next
-- Integrate `feat/outputs` → `main` (PR #3).
-- Plan 4 — Source breadth: news-API + web-scrape collectors (rate limiting, SSRF) and Google Search grounding; also migrate ADK sync `runner.run` → `run_async`.
+- **PR #3 open** → https://github.com/AhmedHeshamSakr/Catch-Up/pull/3 (`feat/outputs` → `main`), awaiting review/merge.
+- After merge → **Plan 4 — Source breadth:** news-API + web-scrape collectors (rate limiting, SSRF) and Google Search grounding; also migrate ADK sync `runner.run` → `run_async`.
