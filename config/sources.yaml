@@ -1,0 +1,32 @@
+# Seed sources. Replace with your curated list anytime.
+sources:
+  - id: techcrunch
+    type: rss
+    name: TechCrunch
+    url: https://techcrunch.com/feed/
+    category_hint: ai_tech
+    enabled: true
+  - id: the_verge
+    type: rss
+    name: The Verge
+    url: https://www.theverge.com/rss/index.xml
+    category_hint: ai_tech
+    enabled: true
+  - id: ft_companies
+    type: rss
+    name: Financial Times — Companies
+    url: https://www.ft.com/companies?format=rss
+    category_hint: business_finance
+    enabled: true
+  - id: aljazeera_all
+    type: rss
+    name: Al Jazeera
+    url: https://www.aljazeera.com/xml/rss/all.xml
+    category_hint: world_geopolitics
+    enabled: true
+  - id: arab_news
+    type: rss
+    name: Arab News
+    url: https://www.arabnews.com/rss.xml
+    category_hint: gulf_mena
+    enabled: true
