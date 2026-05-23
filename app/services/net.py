@@ -27,6 +27,8 @@ def validate_public_url(
         addresses = resolver(host)
     except socket.gaierror as exc:
         raise UnsafeURLError(f"cannot resolve host: {host}") from exc
+    if not addresses:
+        raise UnsafeURLError(f"no addresses resolved for host: {host}")
     for addr in addresses:
         ip = ipaddress.ip_address(addr)
         if (

@@ -27,3 +27,14 @@ def test_allows_public_host():
     assert validate_public_url(
         "https://news.example.com/feed", resolver=_resolver(["93.184.216.34"])
     ) == "https://news.example.com/feed"
+
+
+def test_rejects_empty_resolution():
+    with pytest.raises(UnsafeURLError):
+        validate_public_url("http://news.example.com", resolver=_resolver([]))
+
+
+def test_rejects_multicast_reserved_unspecified():
+    for ip in ("224.0.0.1", "240.0.0.1", "0.0.0.0"):
+        with pytest.raises(UnsafeURLError):
+            validate_public_url("http://x.example", resolver=_resolver([ip]))
