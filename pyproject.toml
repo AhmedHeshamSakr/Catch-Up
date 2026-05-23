@@ -18,6 +18,9 @@ dependencies = [
 requires-python = ">=3.11,<3.14"
 
 
+[project.scripts]
+catchup = "app.cli:main"
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.2,<10.0.0",

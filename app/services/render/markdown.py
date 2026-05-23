@@ -24,7 +24,7 @@ def render_markdown(run: DigestRun, items: list[NewsItem]) -> str:
     for item in items:
         grouped.setdefault(item.category, []).append(item)
 
-    ordered_keys: list[Category | None] = list(CATEGORY_TITLES.keys()) + [None]
+    ordered_keys: list[Category | None] = [*list(CATEGORY_TITLES.keys()), None]
     for cat in ordered_keys:
         group = grouped.get(cat)
         if not group:

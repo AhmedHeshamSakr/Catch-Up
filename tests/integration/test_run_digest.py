@@ -1,7 +1,7 @@
+from app import runner
 from app.adapters.storage.sqlite_backend import SqliteBackend
 from app.core.config import Settings
 from app.core.domain import Category, RawItem, RunStatus, SourceType
-from app import runner
 
 
 def _raw(url: str, title: str) -> RawItem:

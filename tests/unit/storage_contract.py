@@ -1,7 +1,12 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.core.domain import (
-    Category, DigestRun, NewsItem, RawItem, RunStatus, SourceType,
+    Category,
+    DigestRun,
+    NewsItem,
+    RawItem,
+    RunStatus,
+    SourceType,
 )
 
 
@@ -35,7 +40,7 @@ class StorageContract:
         run = DigestRun(run_id="r1")
         self.backend.create_run(run)
         run.status = RunStatus.SUCCESS
-        run.finished_at = datetime.now(timezone.utc)
+        run.finished_at = datetime.now(UTC)
         run.collected = 5
         self.backend.finalize_run(run)
         got = self.backend.get_run("r1")

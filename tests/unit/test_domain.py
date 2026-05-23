@@ -1,5 +1,9 @@
 from app.core.domain import (
-    Category, NewsItem, RawItem, SourceType, make_item_id,
+    Category,
+    NewsItem,
+    RawItem,
+    SourceType,
+    make_item_id,
 )
 
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import feedparser
 import httpx
@@ -29,7 +29,7 @@ def parse_feed(content: bytes, source: SourceConfig) -> list[RawItem]:
         published: datetime | None = None
         if getattr(entry, "published_parsed", None):
             published = datetime.fromtimestamp(
-                time.mktime(entry.published_parsed), tz=timezone.utc
+                time.mktime(entry.published_parsed), tz=UTC
             )
         items.append(
             RawItem(

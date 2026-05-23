@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
@@ -10,33 +10,33 @@ DEFAULT_ORG = "default"
 DEFAULT_USER = "default"
 
 
-class SourceType(str, Enum):
+class SourceType(StrEnum):
     RSS = "rss"
     SCRAPE = "scrape"
     API = "api"
     SEARCH = "search"
 
 
-class Category(str, Enum):
+class Category(StrEnum):
     AI_TECH = "ai_tech"
     BUSINESS_FINANCE = "business_finance"
     WORLD_GEOPOLITICS = "world_geopolitics"
     GULF_MENA = "gulf_mena"
 
 
-class Importance(str, Enum):
+class Importance(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
 
 
-class Sentiment(str, Enum):
+class Sentiment(StrEnum):
     POSITIVE = "positive"
     NEUTRAL = "neutral"
     NEGATIVE = "negative"
 
 
-class RunStatus(str, Enum):
+class RunStatus(StrEnum):
     RUNNING = "running"
     SUCCESS = "success"
     PARTIAL = "partial"
@@ -74,7 +74,7 @@ class NewsItem(BaseModel):
     title: str
     excerpt: str | None = None
     published_at: datetime | None = None
-    collected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    collected_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     category: Category | None = None
     summary_en: str | None = None
     summary_ar: str | None = None
@@ -87,7 +87,7 @@ class NewsItem(BaseModel):
     digest_run_id: str | None = None
 
     @classmethod
-    def from_raw(cls, raw: RawItem, run_id: str | None = None) -> "NewsItem":
+    def from_raw(cls, raw: RawItem, run_id: str | None = None) -> NewsItem:
         return cls(
             id=make_item_id(raw.url),
             source_id=raw.source_id,
@@ -105,7 +105,7 @@ class NewsItem(BaseModel):
 class DigestRun(BaseModel):
     run_id: str
     org_id: str = DEFAULT_ORG
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     finished_at: datetime | None = None
     status: RunStatus = RunStatus.RUNNING
     collected: int = 0

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.adapters.storage.sqlite_backend import SqliteBackend
 from app.core.config import Settings, SourceConfig, load_sources
@@ -43,7 +43,7 @@ def run_digest(
                 {
                     "source_id": source.id,
                     "error": str(exc),
-                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "ts": datetime.now(UTC).isoformat(),
                 }
             )
 
@@ -57,6 +57,6 @@ def run_digest(
 
     run.outputs["md"] = markdown.write_markdown(run, new_items, settings.output_dir)
     run.status = RunStatus.PARTIAL if run.source_errors else RunStatus.SUCCESS
-    run.finished_at = datetime.now(timezone.utc)
+    run.finished_at = datetime.now(UTC)
     storage.finalize_run(run)
     return run
