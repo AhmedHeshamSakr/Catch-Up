@@ -73,6 +73,10 @@ Executed subagent-driven on branch `feat/walking-skeleton` (fresh implementer pe
 - **Result:** `uv run pytest tests -q` → **16 passed**; `uv run --extra lint ruff check app tests` → clean; live `python -m app.cli run` → 80 items, real Markdown digest in `output/`. All commits authored solely by AhmedHeshamSakr, no AI trailers.
 - Note: lint tools live in the `lint` optional extra — run lint via `uv run --extra lint ruff check app tests`.
 
+### Phase: Plan 2 — Intelligence (planning)
+- **PR #1 merged → `main`** (mergeCommit `a8f7b4f`). Branched `feat/intelligence`.
+- Consulted ADK code patterns: `Agent(output_schema=PydanticModel, output_key=…)` run via `InMemoryRunner` for structured output.
+- Wrote **Plan 2 — Intelligence** → `docs/superpowers/plans/2026-05-23-plan2-intelligence.md`: enrichment schemas, watchlist boosts, processing agent (category / importance / EN-AR summaries / entities / sentiment), digest-editor narrative, richer Markdown, and `run_digest` integration with graceful degradation. LLM sits behind an injectable boundary (`EnrichFn`/`NarrateFn`) so deterministic logic is TDD-tested with fakes (no network); the real Gemini call is validated by a live smoke. Formal `agents-cli eval` deferred to post-Plan-4 (needs the conversational root agent).
+
 ### Next
-- **PR #1 open** → https://github.com/AhmedHeshamSakr/Catch-Up/pull/1 (`feat/walking-skeleton` → `main`), awaiting review/merge.
-- After merge → **Plan 2 — Intelligence:** Processing + DigestEditor LLM agents, watchlist boosts, versioned prompts, ADK eval set.
+- Execute Plan 2 subagent-driven. Live smoke (Task 7) needs `GOOGLE_API_KEY` (AI Studio free tier).
