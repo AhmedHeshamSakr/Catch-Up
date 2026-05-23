@@ -1,0 +1,49 @@
+# --- Secrets & env ---
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+service-account*.json
+credentials*.json
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# --- Node / Next.js (web console) ---
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# --- App data & generated artifacts ---
+*.sqlite
+*.sqlite3
+*.db
+/output/
+/data/
+/logs/
+
+# --- Tooling / local ---
+.superpowers/
+.claude/settings.local.json
+.DS_Store
+.idea/
+.vscode/
