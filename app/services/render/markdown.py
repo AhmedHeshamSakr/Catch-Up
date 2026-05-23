@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.core.domain import Category, DigestRun, NewsItem
+from app.core.domain import Category, DigestRun, Importance, NewsItem
 
 CATEGORY_TITLES: dict[Category, str] = {
     Category.AI_TECH: "AI & Technology",
@@ -20,6 +20,9 @@ def render_markdown(run: DigestRun, items: list[NewsItem]) -> str:
         f"*{len(items)} items across {n_categories} categories.*",
         "",
     ]
+    if run.narrative:
+        lines += ["## What matters most", "", run.narrative, ""]
+
     grouped: dict[Category | None, list[NewsItem]] = {}
     for item in items:
         grouped.setdefault(item.category, []).append(item)
@@ -32,7 +35,10 @@ def render_markdown(run: DigestRun, items: list[NewsItem]) -> str:
         lines.append(f"## {CATEGORY_TITLES.get(cat, 'Uncategorized')}")
         lines.append("")
         for item in group:
-            lines.append(f"- [{item.title}]({item.url}) — *{item.source_name}*")
+            badge = f" `{item.importance.value.upper()}`" if item.importance else ""
+            lines.append(f"- [{item.title}]({item.url}){badge} — *{item.source_name}*")
+            if item.summary_en:
+                lines.append(f"  {item.summary_en}")
         lines.append("")
     return "\n".join(lines)
 

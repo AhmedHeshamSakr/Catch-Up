@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     sqlite_path: str = str(REPO_ROOT / "data" / "catchup.db")
     config_dir: str = str(REPO_ROOT / "config")
     output_dir: str = str(REPO_ROOT / "output")
+    importance_threshold: float = 0.33
+    llm_batch_size: int = 8
+    llm_model: str = "gemini-flash-latest"
 
 
 def load_sources(config_dir: str | Path) -> list[SourceConfig]:
