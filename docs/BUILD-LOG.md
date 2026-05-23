@@ -107,5 +107,15 @@ Executed subagent-driven on `feat/outputs` (implementer per batch + spec/quality
 - Wrote **Plan 4 — Source breadth** → `docs/superpowers/plans/2026-05-23-plan4-sources.md`: token-bucket rate limiter, SSRF URL guard (scheme + private-IP rejection), GNews API collector, web-scrape collector (CSS selector, SSRF-guarded), and `run_digest._collect` dispatch by `SourceType` (RSS/API/scrape). All deterministic parts TDD-tested (injectable fetch, no network); live GNews smoke-validated with the key.
 - **Scoped out to Plan 5:** Google Search grounding (needs an ADK grounding-metadata spike) + the sync `runner.run` → `run_async` migration (shares the runner work). Roadmap: **Plan 4 sources(GNews+scrape) · Plan 5 search-grounding + async · Plan 6 orchestration+API · Plan 7 console · Plan 8 prod.**
 
+### Phase: Execution — Plan 4 (Source breadth) ✅
+Executed subagent-driven on `feat/sources` (implementer per batch + spec/quality review gate).
+- **Batch J — Tasks 1–4** (TokenBucket rate limiter; SSRF URL guard; GNews API collector + api/scrape config fields; web-scrape collector): commits `fb468ee`, `a251f96`, `0078679`, `3624aa7`. Reviewed: APPROVED (confirmed `scrape.fetch_page` calls the SSRF guard before httpx).
+- **SSRF hardening** (`0a6fd5f`): reject empty DNS resolution + added multicast/reserved/unspecified test coverage (from the review's minor finding).
+- **Batch K — Task 5** (wire RSS/API/scrape dispatch into `run_digest._collect(source, settings)` + disabled example sources): commit `744fd93`. Reviewed: APPROVED, no issues.
+- **Task 6** docs (`eda83ab`): README source types + GNews key.
+- **Live GNews smoke:** `newsapi.collect` with a real key returned 10 current AI headlines (title + source + URL). API path validated.
+- **Result:** `uv run pytest tests -q` → **52 passed**; `uv run --extra lint ruff check app tests scripts` → clean. `run_digest` now collects from RSS + GNews + scraped pages. All commits authored solely by AhmedHeshamSakr.
+
 ### Next
-- Execute Plan 4 subagent-driven (deterministic; live smoke needs GNEWS_API_KEY).
+- Integrate `feat/sources` → `main` (PR #4).
+- Plan 5 — Google Search grounding collector (ADK grounding-metadata spike) + migrate sync `runner.run` → `run_async`.
