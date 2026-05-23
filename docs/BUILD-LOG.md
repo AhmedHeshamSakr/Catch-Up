@@ -62,5 +62,17 @@ summarizes (EN/AR), extracts entities; renders Excel + HTML dashboard + Markdown
   P3 sources+outputs breadth (API/scrape/search + Excel/HTML) · P4 orchestration (ADK agent tree) +
   scheduler + FastAPI · P5 Next.js "Signal" console · P6 hardening + GCP production.
 
+### Phase: Execution — Plan 1 (Walking Skeleton) ✅
+Executed subagent-driven on branch `feat/walking-skeleton` (fresh implementer per batch + spec/quality review gate).
+- **Tasks 0–1** (controller): scaffolded ADK project to repo root (prototype, AI Studio), set project identity, `uv sync`, added `feedparser/httpx/pyyaml/pydantic-settings`. Commits `8c9747a`, `798ea56`.
+- **Batch A — Tasks 2–3** (domain model + Settings/source loader): commits `064bf8b`, `ed827ad`. Reviewed: APPROVED.
+- **Batch B — Tasks 4–5** (StorageBackend port + reusable contract + SQLite adapter): commits `1f1e5ee`, `84d4237`. Reviewed: APPROVED.
+- **Batch C — Tasks 6–8** (RSS collector, normalize/dedup, Markdown renderer): commits `5c36f47`, `890ac8c`, `21f0d29`. Reviewed: APPROVED (2 ruff nits noted).
+- **Batch D — Tasks 9–10** (`run_digest()` + CLI + lint): commits `38220e2`, `47b615e`. Review: CHANGES_REQUIRED.
+- **Fixes** (commit `1d5e498`): finalize runs as `FAILED` on unexpected errors (was leaving orphaned `RUNNING`); correct RSS UTC parsing (`calendar.timegm` vs `time.mktime` — mattered on non-UTC hosts); graceful CLI errors; documented title-dedup tradeoff. Added regression test for the FAILED-finalize path. Enums upgraded to `StrEnum` (values preserved) during lint.
+- **Result:** `uv run pytest tests -q` → **16 passed**; `uv run --extra lint ruff check app tests` → clean; live `python -m app.cli run` → 80 items, real Markdown digest in `output/`. All commits authored solely by AhmedHeshamSakr, no AI trailers.
+- Note: lint tools live in the `lint` optional extra — run lint via `uv run --extra lint ruff check app tests`.
+
 ### Next
-- Execute Plan 1 (subagent-driven recommended, or inline) following TDD task-by-task.
+- Integrate `feat/walking-skeleton` → `main`.
+- Plan 2 — Intelligence: Processing + DigestEditor LLM agents, watchlist boosts, prompts, ADK eval set.
