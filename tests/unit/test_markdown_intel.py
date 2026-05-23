@@ -1,4 +1,11 @@
-from app.core.domain import Category, DigestRun, Importance, NewsItem, RawItem, SourceType
+from app.core.domain import (
+    Category,
+    DigestRun,
+    Importance,
+    NewsItem,
+    RawItem,
+    SourceType,
+)
 from app.services.render import markdown
 
 

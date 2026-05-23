@@ -45,6 +45,12 @@ uv run python -m app.cli run
 Sources live in `config/sources.yaml`; importance-boost entities/keywords in `config/watchlist.yaml`.
 Without a key, collection/dedup/storage still run and the digest degrades gracefully (items unenriched).
 
+Each run emits three output files: `output/digest-<id>.md`, `output/digest-<id>.xlsx` (master + per-category sheets), and `output/digest-<id>.html` (Signal-themed dashboard). To generate sample outputs with no API key:
+
+```bash
+uv run python scripts/render_smoke.py
+```
+
 ## License
 
 Private.

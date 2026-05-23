@@ -88,6 +88,19 @@ Executed subagent-driven on `feat/intelligence` (implementer per batch + spec/qu
 - **Result:** `uv run pytest tests -q` → **30 passed**; `uv run --extra lint ruff check app tests` → clean. All commits authored solely by AhmedHeshamSakr.
 - **Known follow-up:** ADK sync `runner.run` is deprecated; migrate `adk_enrich`/`adk_narrate` to `run_async` in Plan 4 (async agent tree).
 
+### Phase: Plan 3 — Output breadth (planning)
+- **PR #2 merged → `main`** (`3ba019a`). Branched `feat/outputs`.
+- **Lint regression caught on `main`:** `markdown.py` had an unused `Importance` import and `test_markdown_intel.py` an unsorted import (2 ruff F401/I001 errors). Root cause: the IDE auto-fixed the *working tree* on save *after* the implementer committed, so the "ruff clean" checks ran on the fixed working copy while the committed/merged blob kept the errors. Captured the IDE fix as the first commit on `feat/outputs` (`b4e00eb`); ruff now clean on the committed state. (Process note: run lint on a clean tree / in CI, not just the working copy.)
+- **Scope decision:** split the original "sources & outputs" — do **outputs first** (Excel + HTML; no keys, fully testable, immediate visible value), then source breadth next. Roadmap shifts: **Plan 3 outputs · Plan 4 source breadth (API/scrape/search) · Plan 5 orchestration+API · Plan 6 console · Plan 7 prod.**
+- Wrote **Plan 3 — Output breadth** → `docs/superpowers/plans/2026-05-23-plan3-outputs.md`: Excel workbook (master + per-category sheets via openpyxl), Signal-themed XSS-safe HTML dashboard, `run_digest` writes md+xlsx+html, no-key render smoke. Full TDD, no API keys.
+
+### Phase: Execution — Plan 3 (Output breadth) ✅
+Executed subagent-driven on `feat/outputs` (implementer per batch + spec/quality review gate).
+- **Batch H — Tasks 1–3** (openpyxl dep; Excel workbook master + per-category sheets; Signal-themed XSS-safe HTML dashboard): commits `91e017d`, `5103c3d`, `6c6d9c6`. Reviewed: APPROVED (HTML escaping audit confirmed every dynamic field escaped via `_esc`).
+- **Batch I — Tasks 4–5** (write xlsx+html in `run_digest`; no-key render smoke + README): commits `b119f1a`, `b5775e6`. Reviewed: APPROVED.
+- Also fixed the `main` lint regression as the branch's first commit (`b4e00eb`).
+- **Result:** `uv run pytest tests -q` → **36 passed**; `uv run --extra lint ruff check app tests scripts` → clean; `uv run python scripts/render_smoke.py` → `output/digest-smoke01.{md,xlsx,html}`. Each `run_digest` now emits all three formats. All commits authored solely by AhmedHeshamSakr.
+
 ### Next
-- **PR #2 open** → https://github.com/AhmedHeshamSakr/Catch-Up/pull/2 (`feat/intelligence` → `main`), awaiting review/merge.
-- After merge → **Plan 3 — Sources & outputs breadth:** API + scrape + Search-grounding collectors (rate limiting, SSRF, resilience) + Excel + HTML renderers.
+- **PR #3 open** → https://github.com/AhmedHeshamSakr/Catch-Up/pull/3 (`feat/outputs` → `main`), awaiting review/merge.
+- After merge → **Plan 4 — Source breadth:** news-API + web-scrape collectors (rate limiting, SSRF) and Google Search grounding; also migrate ADK sync `runner.run` → `run_async`.
