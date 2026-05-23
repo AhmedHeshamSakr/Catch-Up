@@ -45,6 +45,22 @@ summarizes (EN/AR), extracts entities; renders Excel + HTML dashboard + Markdown
   **`deep-search`** (multi-agent + grounding + report), **`safety-plugins`** (guardrails).
 - Inspected `agents-cli` scaffold output (temp reference project) to ground the implementation plan.
 
+### Phase: Planning
+- Confirmed structural decisions: **repo layout = agents-cli project at the repo root** (`app/` with
+  `frontend/` as a sibling, exactly as agents-cli expects); **build approach = incremental "walking
+  skeleton"** (6 plans, each ships working, testable software).
+- Captured scaffold conventions: `Agent(...) + App(name="app")`, model alias `gemini-flash-latest`
+  (preserve), monorepo-aware `pyproject.toml` (`packages=["app","frontend"]`),
+  `tests/{unit,integration,eval}`, ruff + ty lint, Python 3.11–3.13.
+- Wrote **Plan 1 — Walking Skeleton** →
+  `docs/superpowers/plans/2026-05-23-plan1-walking-skeleton.md`: scaffold→relocate, domain model,
+  Settings + source loader, SQLite storage behind a port (+ reusable contract tests), RSS collector,
+  normalize/dedup, Markdown renderer, `run_digest()` orchestrator (per-source isolation), and CLI —
+  full bite-sized TDD. Outcome when executed: `python -m app.cli run` produces a real Markdown digest
+  from live RSS feeds. No LLM yet.
+- **Plan decomposition:** P1 skeleton · P2 intelligence (LLM processing + digest editor + eval) ·
+  P3 sources+outputs breadth (API/scrape/search + Excel/HTML) · P4 orchestration (ADK agent tree) +
+  scheduler + FastAPI · P5 Next.js "Signal" console · P6 hardening + GCP production.
+
 ### Next
-- Write Plan 1 (Backend Foundation & Digest Pipeline), grounded in the real scaffold structure.
-- Decompose remaining work into Plans 2 (FastAPI), 3 (Next.js console), 4 (prod hardening/deploy).
+- Execute Plan 1 (subagent-driven recommended, or inline) following TDD task-by-task.
