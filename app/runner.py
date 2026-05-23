@@ -9,7 +9,8 @@ from app.core.domain import DigestRun, Importance, RawItem, RunStatus, SourceTyp
 from app.core.ports.storage import StorageBackend
 from app.pipeline import digest_editor, processing
 from app.services import normalize, rss
-from app.services.render import markdown
+from app.services.render import excel, markdown
+from app.services.render import html as html_render
 from app.services.watchlist import load_watchlist
 
 
@@ -88,6 +89,8 @@ def run_digest(
             run.source_errors.append(
                 {"stage": "narrative", "error": str(exc), "ts": datetime.now(UTC).isoformat()})
         run.outputs["md"] = markdown.write_markdown(run, rendered, settings.output_dir)
+        run.outputs["xlsx"] = excel.write_excel(run, rendered, settings.output_dir)
+        run.outputs["html"] = html_render.write_html(run, rendered, settings.output_dir)
 
         run.status = RunStatus.PARTIAL if run.source_errors else RunStatus.SUCCESS
         run.finished_at = datetime.now(UTC)
