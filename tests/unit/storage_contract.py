@@ -79,3 +79,28 @@ class StorageContract:
         high = self.backend.list_news(importance=Importance.HIGH)
         assert {i.url for i in high} == {"https://a/1", "https://a/3"}
         assert len(self.backend.list_news()) == 3
+
+    def test_list_news_combined_filter_and_ordering(self):
+        from datetime import UTC, datetime
+
+        from app.core.domain import Category, Importance, NewsItem, RawItem, SourceType
+
+        def mk(url, cat, imp, when):
+            raw = RawItem(source_id="s", source_type=SourceType.RSS,
+                          source_name="S", url=url, title="t")
+            it = NewsItem.from_raw(raw, run_id="r1")
+            it.category = cat
+            it.importance = imp
+            it.collected_at = when
+            return it
+
+        self.backend.save_items([
+            mk("https://a/1", Category.AI_TECH, Importance.HIGH, datetime(2026, 5, 21, tzinfo=UTC)),
+            mk("https://a/2", Category.AI_TECH, Importance.HIGH, datetime(2026, 5, 23, tzinfo=UTC)),
+            mk("https://a/3", Category.AI_TECH, Importance.LOW, datetime(2026, 5, 22, tzinfo=UTC)),
+        ])
+        # combined AND filter → only the two HIGH AI items, newest (collected_at) first
+        both = self.backend.list_news(category=Category.AI_TECH, importance=Importance.HIGH)
+        assert [i.url for i in both] == ["https://a/2", "https://a/1"]
+        # limit respected
+        assert len(self.backend.list_news(limit=1)) == 1
