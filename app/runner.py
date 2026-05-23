@@ -8,7 +8,7 @@ from app.core.config import Settings, SourceConfig, load_sources
 from app.core.domain import DigestRun, Importance, RawItem, RunStatus, SourceType
 from app.core.ports.storage import StorageBackend
 from app.pipeline import digest_editor, processing
-from app.services import normalize, rss
+from app.services import newsapi, normalize, rss, scrape
 from app.services.render import excel, markdown
 from app.services.render import html as html_render
 from app.services.watchlist import load_watchlist
@@ -20,10 +20,14 @@ def build_storage(settings: Settings) -> StorageBackend:
     return backend
 
 
-def _collect(source: SourceConfig) -> list[RawItem]:
+def _collect(source: SourceConfig, settings: Settings) -> list[RawItem]:
     if source.type == SourceType.RSS:
         return rss.collect(source)
-    return []  # SCRAPE / API / SEARCH arrive in Plan 3
+    if source.type == SourceType.API:
+        return newsapi.collect(source, settings.gnews_api_key)
+    if source.type == SourceType.SCRAPE:
+        return scrape.collect(source)
+    return []  # SEARCH grounding arrives in Plan 5
 
 
 def _default_processor(settings: Settings):
@@ -54,7 +58,7 @@ def run_digest(
             if not source.enabled:
                 continue
             try:
-                raws.extend(_collect(source))
+                raws.extend(_collect(source, settings))
             except Exception as exc:  # per-source isolation
                 run.source_errors.append(
                     {

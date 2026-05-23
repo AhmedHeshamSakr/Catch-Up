@@ -30,3 +30,26 @@ sources:
     url: https://www.arabnews.com/rss.xml
     category_hint: gulf_mena
     enabled: true
+  - id: gnews_ai
+    type: api
+    name: GNews — AI
+    query: artificial intelligence
+    lang: en
+    category_hint: ai_tech
+    enabled: false
+  - id: gnews_gulf
+    type: api
+    name: GNews — Gulf
+    query: Qatar OR Gulf economy
+    lang: en
+    country: qa
+    category_hint: gulf_mena
+    enabled: false
+  # Example scrape source — set a real selector before enabling.
+  - id: example_scrape
+    type: scrape
+    name: Example Announcements
+    url: https://example.com/news
+    selector: a.headline
+    category_hint: business_finance
+    enabled: false
