@@ -1,13 +1,23 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from app.adapters.storage.sqlite_backend import SqliteBackend
 from app.api.app import create_app
 from app.core.config import Settings
+from app.core.domain import (
+    Category,
+    DigestRun,
+    Importance,
+    NewsItem,
+    RawItem,
+    SourceType,
+)
 
 
 @pytest.fixture
 def client(tmp_path):
-    cfg = tmp_path / "config"; cfg.mkdir()
+    cfg = tmp_path / "config"
+    cfg.mkdir()
     (cfg / "sources.yaml").write_text("sources: []\n", encoding="utf-8")
     (cfg / "watchlist.yaml").write_text("entities: []\nkeywords: []\n", encoding="utf-8")
     settings = Settings(sqlite_path=str(tmp_path / "db.sqlite"),
@@ -20,3 +30,73 @@ def test_health(client):
     r = client.get("/api/health")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
+
+
+def _seed(settings):
+    st = SqliteBackend(settings.sqlite_path)
+    st.init_schema()
+    run = DigestRun(run_id="r1")
+    st.create_run(run)
+    raw = RawItem(source_id="s", source_type=SourceType.RSS, source_name="S",
+                  url="https://a/1", title="AI item")
+    it = NewsItem.from_raw(raw, run_id="r1")
+    it.category = Category.AI_TECH
+    it.importance = Importance.HIGH
+    it.summary_en = "Summary."
+    st.save_items([it])
+    return st
+
+
+def test_dashboard_news_runs(tmp_path):
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "sources.yaml").write_text("sources: []\n", encoding="utf-8")
+    (cfg / "watchlist.yaml").write_text("entities: []\nkeywords: []\n", encoding="utf-8")
+    settings = Settings(sqlite_path=str(tmp_path / "db.sqlite"),
+                        config_dir=str(cfg), output_dir=str(tmp_path / "out"))
+    _seed(settings)
+    app = create_app(settings, run_digest_fn=lambda **kw: None)
+    c = TestClient(app)
+
+    d = c.get("/api/dashboard").json()
+    assert d["total_items"] == 1
+    assert d["category_counts"]["ai_tech"] == 1
+    assert d["latest_run"]["run_id"] == "r1"
+
+    runs = c.get("/api/runs").json()
+    assert [r["run_id"] for r in runs] == ["r1"]
+
+    detail = c.get("/api/runs/r1").json()
+    assert detail["run"]["run_id"] == "r1"
+    assert detail["items"][0]["url"] == "https://a/1"
+
+    assert c.get("/api/runs/missing").status_code == 404
+
+    high = c.get("/api/news", params={"importance": "high"}).json()
+    assert len(high) == 1 and high[0]["title"] == "AI item"
+
+
+def test_sources_and_watchlist_crud(client):
+    payload = [{"id": "x", "type": "rss", "name": "X", "url": "https://x/feed",
+                "category_hint": "ai_tech", "enabled": True}]
+    assert client.put("/api/sources", json=payload).status_code == 200
+    got = client.get("/api/sources").json()
+    assert got[0]["id"] == "x"
+
+    assert client.put("/api/watchlist", json={"entities": ["OpenAI"], "keywords": []}).status_code == 200
+    assert client.get("/api/watchlist").json()["entities"] == ["OpenAI"]
+
+
+def test_trigger_run_calls_injected_fn(tmp_path):
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "sources.yaml").write_text("sources: []\n", encoding="utf-8")
+    (cfg / "watchlist.yaml").write_text("entities: []\nkeywords: []\n", encoding="utf-8")
+    settings = Settings(sqlite_path=str(tmp_path / "db.sqlite"),
+                        config_dir=str(cfg), output_dir=str(tmp_path / "out"))
+    called = {"n": 0}
+    app = create_app(settings, run_digest_fn=lambda **kw: called.__setitem__("n", called["n"] + 1))
+    c = TestClient(app)
+    r = c.post("/api/runs")
+    assert r.status_code == 202
+    assert called["n"] == 1  # BackgroundTasks runs after response in TestClient
