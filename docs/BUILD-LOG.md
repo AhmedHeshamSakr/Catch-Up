@@ -130,5 +130,5 @@ Executed subagent-driven on `feat/api` (implementer per batch + spec/quality rev
 - **Result:** `uv run pytest tests -q` → **62 passed**; `uv run --extra lint ruff check app tests scripts` → clean. `uv run python -m app.cli serve` boots; `/api/health` + `/docs` return 200. All commits authored solely by AhmedHeshamSakr.
 
 ### Next
-- Integrate `feat/api` → `main` (PR #5).
-- Plan 6 — Next.js "Signal" console (consumes this API); then Plan 7 — search-grounding + `run_async` (when quota resets).
+- **PR #5 open** → https://github.com/AhmedHeshamSakr/Catch-Up/pull/5 (`feat/api` → `main`), awaiting review/merge.
+- After merge → **Plan 6 — Next.js "Signal" console** (consumes this API); then Plan 7 — search-grounding + `run_async` (when Gemini quota resets).
