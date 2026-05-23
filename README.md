@@ -72,7 +72,7 @@ uv run python -m app.cli serve --host 0.0.0.0 --port 8080
 | `GET /api/watchlist` | Watchlist entities + keywords |
 | `PUT /api/watchlist` | Update watchlist |
 | `POST /api/runs` | Trigger a new digest run (async) |
-| `GET /api/docs` | FastAPI auto-generated interactive docs |
+| `GET /docs` | FastAPI auto-generated interactive docs (OpenAPI) |
 
 ## License
 
