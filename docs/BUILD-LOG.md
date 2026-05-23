@@ -101,6 +101,11 @@ Executed subagent-driven on `feat/outputs` (implementer per batch + spec/quality
 - Also fixed the `main` lint regression as the branch's first commit (`b4e00eb`).
 - **Result:** `uv run pytest tests -q` → **36 passed**; `uv run --extra lint ruff check app tests scripts` → clean; `uv run python scripts/render_smoke.py` → `output/digest-smoke01.{md,xlsx,html}`. Each `run_digest` now emits all three formats. All commits authored solely by AhmedHeshamSakr.
 
+### Phase: Plan 4 — Source breadth (planning)
+- **PR #3 merged → `main`**. Branched `feat/sources`.
+- **Decision:** news-API provider = **GNews** (generous free tier, search + lang/country, good for Arabic/Gulf).
+- Wrote **Plan 4 — Source breadth** → `docs/superpowers/plans/2026-05-23-plan4-sources.md`: token-bucket rate limiter, SSRF URL guard (scheme + private-IP rejection), GNews API collector, web-scrape collector (CSS selector, SSRF-guarded), and `run_digest._collect` dispatch by `SourceType` (RSS/API/scrape). All deterministic parts TDD-tested (injectable fetch, no network); live GNews smoke-validated with the key.
+- **Scoped out to Plan 5:** Google Search grounding (needs an ADK grounding-metadata spike) + the sync `runner.run` → `run_async` migration (shares the runner work). Roadmap: **Plan 4 sources(GNews+scrape) · Plan 5 search-grounding + async · Plan 6 orchestration+API · Plan 7 console · Plan 8 prod.**
+
 ### Next
-- **PR #3 open** → https://github.com/AhmedHeshamSakr/Catch-Up/pull/3 (`feat/outputs` → `main`), awaiting review/merge.
-- After merge → **Plan 4 — Source breadth:** news-API + web-scrape collectors (rate limiting, SSRF) and Google Search grounding; also migrate ADK sync `runner.run` → `run_async`.
+- Execute Plan 4 subagent-driven (deterministic; live smoke needs GNEWS_API_KEY).
