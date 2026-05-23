@@ -89,5 +89,5 @@ Executed subagent-driven on `feat/intelligence` (implementer per batch + spec/qu
 - **Known follow-up:** ADK sync `runner.run` is deprecated; migrate `adk_enrich`/`adk_narrate` to `run_async` in Plan 4 (async agent tree).
 
 ### Next
-- Integrate `feat/intelligence` → `main` (PR #2).
-- Plan 3 — Sources & outputs breadth: API + scrape + Search-grounding collectors (rate limiting, SSRF, resilience) + Excel + HTML renderers.
+- **PR #2 open** → https://github.com/AhmedHeshamSakr/Catch-Up/pull/2 (`feat/intelligence` → `main`), awaiting review/merge.
+- After merge → **Plan 3 — Sources & outputs breadth:** API + scrape + Search-grounding collectors (rate limiting, SSRF, resilience) + Excel + HTML renderers.
