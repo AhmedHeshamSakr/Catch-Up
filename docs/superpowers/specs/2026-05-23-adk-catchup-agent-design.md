@@ -310,9 +310,15 @@ GET  /api/news  (search/filter)
 9. **Hardening** — security, observability, full resilience.
 10. **(Later) Production** — Firestore, Cloud Run, Cloud Scheduler, Vertex; email delivery.
 
-## 23. Open Questions / Future Work
+## 23. Resolved Decisions & Future Work
 
-- Specific seed source list (RSS URLs, scrape targets, which news API).
-- Excel schema final columns (current proposal in §7 fields).
-- Email delivery design (deferred).
-- Multi-tenant auth rollout timing.
+**Resolved (2026-05-23):**
+- **Seed sources:** v1 ships a **curated default set** of reputable RSS/API/search sources across
+  the 4 categories (including Gulf/MENA + Arabic) so it works out of the box; Ahmed replaces them
+  with his curated list later (sources are editable via UI/config).
+- **Excel schema:** **approved** — `Date, Title, Summary (EN), Summary (AR), Category, Source, URL,
+  Importance, Entities, Sentiment`; master sheet + one sheet per category.
+
+**Future work:**
+- Email / push delivery (deferred phase).
+- Multi-tenant auth rollout timing (architecture ready; enable when needed).
