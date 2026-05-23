@@ -32,31 +32,39 @@ def run_digest(
     run = DigestRun(run_id=uuid.uuid4().hex[:12])
     storage.create_run(run)
 
-    raws: list[RawItem] = []
-    for source in load_sources(settings.config_dir):
-        if not source.enabled:
-            continue
-        try:
-            raws.extend(_collect(source))
-        except Exception as exc:  # per-source isolation
-            run.source_errors.append(
-                {
-                    "source_id": source.id,
-                    "error": str(exc),
-                    "ts": datetime.now(UTC).isoformat(),
-                }
-            )
+    try:
+        raws: list[RawItem] = []
+        for source in load_sources(settings.config_dir):
+            if not source.enabled:
+                continue
+            try:
+                raws.extend(_collect(source))
+            except Exception as exc:  # per-source isolation
+                run.source_errors.append(
+                    {
+                        "source_id": source.id,
+                        "error": str(exc),
+                        "ts": datetime.now(UTC).isoformat(),
+                    }
+                )
 
-    run.collected = len(raws)
-    new_items = normalize.normalize_and_dedup(raws, storage, run.run_id)
-    for item in new_items:
-        item.status = "processed"  # skeleton: real LLM processing in Plan 2
-    run.new = len(new_items)
-    run.processed = len(new_items)
-    storage.save_items(new_items)
+        run.collected = len(raws)
+        new_items = normalize.normalize_and_dedup(raws, storage, run.run_id)
+        for item in new_items:
+            item.status = "processed"  # skeleton: real LLM processing in Plan 2
+        run.new = len(new_items)
+        run.processed = len(new_items)
+        storage.save_items(new_items)
 
-    run.outputs["md"] = markdown.write_markdown(run, new_items, settings.output_dir)
-    run.status = RunStatus.PARTIAL if run.source_errors else RunStatus.SUCCESS
-    run.finished_at = datetime.now(UTC)
-    storage.finalize_run(run)
+        run.outputs["md"] = markdown.write_markdown(run, new_items, settings.output_dir)
+        run.status = RunStatus.PARTIAL if run.source_errors else RunStatus.SUCCESS
+        run.finished_at = datetime.now(UTC)
+        storage.finalize_run(run)
+    except Exception as exc:
+        run.status = RunStatus.FAILED
+        run.finished_at = datetime.now(UTC)
+        run.source_errors.append({"error": str(exc), "ts": datetime.now(UTC).isoformat()})
+        storage.finalize_run(run)
+        raise
+
     return run

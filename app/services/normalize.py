@@ -12,6 +12,9 @@ def normalize_and_dedup(
     raws: list[RawItem], storage: StorageBackend, run_id: str
 ) -> list[NewsItem]:
     seen_ids: set[str] = set()
+    # NOTE: normalized-title dedup may collapse distinct same-headline articles from
+    # different sources (e.g. wire stories reprinted verbatim). Source-aware or fuzzy
+    # dedup is deferred to a later plan.
     seen_titles: set[str] = set()
     candidates: list[NewsItem] = []
     for raw in raws:
