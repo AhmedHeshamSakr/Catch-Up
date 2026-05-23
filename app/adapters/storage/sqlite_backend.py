@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from app.core.domain import Category, DigestRun, Importance, NewsItem
+from app.core.domain import DigestRun, NewsItem
 from app.core.ports.storage import StorageBackend
 
 

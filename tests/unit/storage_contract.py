@@ -52,10 +52,11 @@ class StorageContract:
         assert self.backend.get_run("nope") is None
 
     def test_list_runs_most_recent_first(self):
-        from app.core.domain import DigestRun, RunStatus
-        from datetime import datetime, timezone
+        from datetime import UTC, datetime
+
+        from app.core.domain import DigestRun
         for i, rid in enumerate(["r1", "r2", "r3"]):
-            run = DigestRun(run_id=rid, started_at=datetime(2026, 5, 20 + i, tzinfo=timezone.utc))
+            run = DigestRun(run_id=rid, started_at=datetime(2026, 5, 20 + i, tzinfo=UTC))
             self.backend.create_run(run)
         runs = self.backend.list_runs(limit=2)
         assert [r.run_id for r in runs] == ["r3", "r2"]
