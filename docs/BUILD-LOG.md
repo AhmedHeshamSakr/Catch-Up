@@ -78,5 +78,16 @@ Executed subagent-driven on branch `feat/walking-skeleton` (fresh implementer pe
 - Consulted ADK code patterns: `Agent(output_schema=PydanticModel, output_key=…)` run via `InMemoryRunner` for structured output.
 - Wrote **Plan 2 — Intelligence** → `docs/superpowers/plans/2026-05-23-plan2-intelligence.md`: enrichment schemas, watchlist boosts, processing agent (category / importance / EN-AR summaries / entities / sentiment), digest-editor narrative, richer Markdown, and `run_digest` integration with graceful degradation. LLM sits behind an injectable boundary (`EnrichFn`/`NarrateFn`) so deterministic logic is TDD-tested with fakes (no network); the real Gemini call is validated by a live smoke. Formal `agents-cli eval` deferred to post-Plan-4 (needs the conversational root agent).
 
+### Phase: Execution — Plan 2 (Intelligence) ✅
+Executed subagent-driven on `feat/intelligence` (implementer per batch + spec/quality review gate).
+- **Batch E — Tasks 1–2** (enrichment schemas + intelligence settings; watchlist loader + boost): commits `45074b1`, `6056038`; lint fix `7709257`. Reviewed: APPROVED.
+- **Batch F — Tasks 3–4** (processing agent + merge/boost/threshold; digest-editor narrative): commits `5a26070`, `5c7d788`. Reviewed: APPROVED. Follow-up fix `9294352`: moved item data to the user message (rules stay in the agent instruction) so the model never sees a literal `{items_json}` placeholder.
+- **Batch G — Tasks 5–6** (richer Markdown: narrative + summaries + importance badge; `run_digest` integration with two-level graceful degradation): commits `4017321`, `ff03438`. Reviewed: APPROVED.
+- **Task 7** docs (`fe3faff`): processing golden seed + README run instructions.
+- **Live smoke (real Gemini, AI Studio key):** 3 sample items enriched correctly — categories right, importance calibrated (0.70 / 0.80 / 0.05 for a trivial typo), accurate EN + Arabic(MSA) summaries, entities (OpenAI, Qatar Investment Authority), and a coherent "what matters most" narrative. The real LLM path is validated.
+- **Result:** `uv run pytest tests -q` → **30 passed**; `uv run --extra lint ruff check app tests` → clean. All commits authored solely by AhmedHeshamSakr.
+- **Known follow-up:** ADK sync `runner.run` is deprecated; migrate `adk_enrich`/`adk_narrate` to `run_async` in Plan 4 (async agent tree).
+
 ### Next
-- Execute Plan 2 subagent-driven. Live smoke (Task 7) needs `GOOGLE_API_KEY` (AI Studio free tier).
+- Integrate `feat/intelligence` → `main` (PR #2).
+- Plan 3 — Sources & outputs breadth: API + scrape + Search-grounding collectors (rate limiting, SSRF, resilience) + Excel + HTML renderers.
