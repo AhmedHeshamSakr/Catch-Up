@@ -43,7 +43,7 @@ def adk_narrate(items: list[NewsItem], settings: Settings) -> str:
     payload = json.dumps(
         [{"title": i.title, "summary": i.summary_en, "category": (i.category.value if i.category else None)}
          for i in items], ensure_ascii=False)
-    message = types.Content(role="user", parts=[types.Part.from_text(text=_PROMPT.replace("{items_json}", payload))])
+    message = types.Content(role="user", parts=[types.Part.from_text(text=payload)])
     text = ""
     for event in runner.run(user_id="system", session_id=session.id, new_message=message):
         if event.is_final_response() and event.content and event.content.parts:

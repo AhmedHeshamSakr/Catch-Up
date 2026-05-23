@@ -9,5 +9,4 @@ Rules:
 - `sentiment`: positive, neutral, or negative (overall tone toward the subject).
 - Return one enrichment per input item, echoing its exact `id`.
 
-Input items:
-{items_json}
+The news items to enrich are provided as a JSON array in the user message.

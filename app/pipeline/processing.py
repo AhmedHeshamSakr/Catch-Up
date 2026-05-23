@@ -54,8 +54,7 @@ def adk_enrich(items: list[NewsItem], settings: Settings) -> ProcessingResult:
     agent = build_processing_agent(settings.llm_model)
     runner = InMemoryRunner(agent=agent, app_name="catchup")
     session = runner.session_service.create_session_sync(app_name="catchup", user_id="system")
-    prompt = _PROMPT.replace("{items_json}", _items_json(items))
-    message = types.Content(role="user", parts=[types.Part.from_text(text=prompt)])
+    message = types.Content(role="user", parts=[types.Part.from_text(text=_items_json(items))])
     text = ""
     for event in runner.run(user_id="system", session_id=session.id, new_message=message):
         if event.is_final_response() and event.content and event.content.parts:
