@@ -1,3 +1,12 @@
-# Entities/keywords that boost importance (used from Plan 2).
-entities: []
-keywords: []
+# Entities/keywords that boost importance. Replace with your own.
+entities:
+  - OpenAI
+  - Google
+  - Anthropic
+  - Qatar Investment Authority
+  - Vertex AI
+keywords:
+  - acquisition
+  - funding round
+  - regulation
+  - data breach
