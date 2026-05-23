@@ -1,6 +1,6 @@
 from app.core.config import Settings
-from app.pipeline.schema import ItemEnrichment, ProcessingResult
 from app.core.domain import Category, Sentiment
+from app.pipeline.schema import ItemEnrichment, ProcessingResult
 
 
 def test_settings_has_intelligence_defaults():
