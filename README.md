@@ -51,6 +51,29 @@ Each run emits three output files: `output/digest-<id>.md`, `output/digest-<id>.
 uv run python scripts/render_smoke.py
 ```
 
+## API
+
+Start the REST API server (no API key needed for health/dashboard reads):
+
+```bash
+uv run python -m app.cli serve          # http://127.0.0.1:8000
+uv run python -m app.cli serve --host 0.0.0.0 --port 8080
+```
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/health` | Liveness check — returns `{"status":"ok"}` |
+| `GET /api/dashboard` | Latest run, recent runs, category counts, total items |
+| `GET /api/news` | News items (filterable by `category` + `importance`) |
+| `GET /api/runs` | Recent digest runs |
+| `GET /api/runs/{run_id}` | Run detail + its news items |
+| `GET /api/sources` | Configured news sources |
+| `PUT /api/sources` | Update sources config (YAML round-trip) |
+| `GET /api/watchlist` | Watchlist entities + keywords |
+| `PUT /api/watchlist` | Update watchlist |
+| `POST /api/runs` | Trigger a new digest run (async) |
+| `GET /docs` | FastAPI auto-generated interactive docs (OpenAPI) |
+
 ## License
 
 Private.

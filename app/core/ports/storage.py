@@ -28,3 +28,11 @@ class StorageBackend(ABC):
 
     @abstractmethod
     def get_run(self, run_id: str) -> DigestRun | None: ...
+
+    @abstractmethod
+    def list_runs(self, limit: int = 20) -> list[DigestRun]: ...
+
+    @abstractmethod
+    def list_news(
+        self, *, category=None, importance=None, limit: int = 50
+    ) -> list[NewsItem]: ...

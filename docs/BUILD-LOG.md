@@ -116,6 +116,19 @@ Executed subagent-driven on `feat/sources` (implementer per batch + spec/quality
 - **Live GNews smoke:** `newsapi.collect` with a real key returned 10 current AI headlines (title + source + URL). API path validated.
 - **Result:** `uv run pytest tests -q` → **52 passed**; `uv run --extra lint ruff check app tests scripts` → clean. `run_digest` now collects from RSS + GNews + scraped pages. All commits authored solely by AhmedHeshamSakr.
 
+### Phase: Pivot — quota wall → API + Console (planning)
+- **PR #4 merged → `main`.** Started a Plan 5 (search-grounding) spike to learn ADK's `google_search` grounding-metadata shape; confirmed `from google.adk.tools import google_search` imports, but hit **Gemini `429 RESOURCE_EXHAUSTED`** — AI Studio free-tier quota exhausted for the day. Live LLM validation blocked until reset.
+- **Decision (with Ahmed):** pivot to **quota-free** work — the **FastAPI API** then the **Next.js console** (both operate on stored data + config; only "Run now" needs Gemini). Search-grounding + the `run_async` migration deferred until quota resets.
+- Reused the branch as `feat/api`. Wrote **Plan 5 — FastAPI API** → `docs/superpowers/plans/2026-05-24-plan5-api.md`: extend storage with `list_runs`/filterable `list_news`; `config_store` (sources/watchlist write); `create_app()` factory with CORS + `/api` router (health, dashboard, runs, news, sources/watchlist CRUD, run trigger); `catchup serve` CLI. TestClient TDD; run trigger injected so tests need no Gemini quota.
+- **Roadmap now:** Plan 5 API · Plan 6 Next.js console · Plan 7 search-grounding + async · Plan 8 orchestration (ADK agent tree) · Plan 9 GCP prod.
+
+### Phase: Execution — Plan 5 (FastAPI API) ✅
+Executed subagent-driven on `feat/api` (implementer per batch + spec/quality review gate). Fully quota-free.
+- **Batch L — Tasks 1–2** (storage `list_runs`/filterable `list_news` + columns; `config_store` write): commits `c78cbbd`, `ae6f701`, `8e55c7b`. Review: CHANGES_REQUIRED → **fixed** (`fbba973`): added a PRAGMA-based `ADD COLUMN` migration to `init_schema` (existing dev DBs no longer crash), created the missing indexes, and added combined-filter/ordering + migration tests.
+- **Batch M — Tasks 3–4** (`create_app()` factory: CORS + `/api` router — health, dashboard, runs, news, sources/watchlist CRUD, run trigger; TestClient tests): commits `7921d35`, `9f81536`. Reviewed: APPROVED (run trigger injected → no test touches Gemini). Minor forward-looking notes: add CORS `allow_credentials` when auth lands; use `COUNT` for dashboard at scale.
+- **Batch N — Task 5** (`catchup serve` CLI + README API table): commit `7ede503` + doc fix `…` (auto-docs at `/docs`).
+- **Result:** `uv run pytest tests -q` → **62 passed**; `uv run --extra lint ruff check app tests scripts` → clean. `uv run python -m app.cli serve` boots; `/api/health` + `/docs` return 200. All commits authored solely by AhmedHeshamSakr.
+
 ### Next
-- **PR #4 open** → https://github.com/AhmedHeshamSakr/Catch-Up/pull/4 (`feat/sources` → `main`), awaiting review/merge.
-- After merge → **Plan 5 — Google Search grounding collector** (ADK grounding-metadata spike) + migrate sync `runner.run` → `run_async`.
+- **PR #5 open** → https://github.com/AhmedHeshamSakr/Catch-Up/pull/5 (`feat/api` → `main`), awaiting review/merge.
+- After merge → **Plan 6 — Next.js "Signal" console** (consumes this API); then Plan 7 — search-grounding + `run_async` (when Gemini quota resets).
