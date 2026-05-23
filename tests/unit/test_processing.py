@@ -1,5 +1,13 @@
 from app.core.config import Settings
-from app.core.domain import Category, Entity, Importance, NewsItem, RawItem, Sentiment, SourceType
+from app.core.domain import (
+    Category,
+    Entity,
+    Importance,
+    NewsItem,
+    RawItem,
+    Sentiment,
+    SourceType,
+)
 from app.pipeline import processing
 from app.pipeline.schema import ItemEnrichment, ProcessingResult
 from app.services.watchlist import Watchlist
