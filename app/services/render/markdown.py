@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.core.domain import Category, DigestRun, Importance, NewsItem
+from app.core.domain import Category, DigestRun, NewsItem
 
 CATEGORY_TITLES: dict[Category, str] = {
     Category.AI_TECH: "AI & Technology",
