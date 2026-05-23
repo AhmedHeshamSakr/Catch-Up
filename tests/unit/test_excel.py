@@ -1,7 +1,14 @@
 from openpyxl import load_workbook
 
 from app.core.domain import (
-    Category, DigestRun, Entity, Importance, NewsItem, RawItem, Sentiment, SourceType,
+    Category,
+    DigestRun,
+    Entity,
+    Importance,
+    NewsItem,
+    RawItem,
+    Sentiment,
+    SourceType,
 )
 from app.services.render import excel
 
