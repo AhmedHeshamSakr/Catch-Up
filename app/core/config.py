@@ -18,6 +18,9 @@ class SourceConfig(BaseModel):
     url: str | None = None
     query: str | None = None
     category_hint: Category | None = None
+    selector: str | None = None   # CSS selector for scrape sources
+    lang: str | None = None       # e.g. "en", "ar" (api sources)
+    country: str | None = None    # e.g. "qa", "us" (api sources)
     enabled: bool = True
 
 
@@ -32,6 +35,7 @@ class Settings(BaseSettings):
     importance_threshold: float = 0.33
     llm_batch_size: int = 8
     llm_model: str = "gemini-flash-latest"
+    gnews_api_key: str = ""
 
 
 def load_sources(config_dir: str | Path) -> list[SourceConfig]:
