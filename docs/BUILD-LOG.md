@@ -74,5 +74,5 @@ Executed subagent-driven on branch `feat/walking-skeleton` (fresh implementer pe
 - Note: lint tools live in the `lint` optional extra — run lint via `uv run --extra lint ruff check app tests`.
 
 ### Next
-- Integrate `feat/walking-skeleton` → `main`.
-- Plan 2 — Intelligence: Processing + DigestEditor LLM agents, watchlist boosts, prompts, ADK eval set.
+- **PR #1 open** → https://github.com/AhmedHeshamSakr/Catch-Up/pull/1 (`feat/walking-skeleton` → `main`), awaiting review/merge.
+- After merge → **Plan 2 — Intelligence:** Processing + DigestEditor LLM agents, watchlist boosts, versioned prompts, ADK eval set.
