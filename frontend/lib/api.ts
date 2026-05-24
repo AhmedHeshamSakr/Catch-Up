@@ -4,6 +4,7 @@ import type {
   RunDetail,
   NewsItem,
   SourceConfig,
+  SourceType,
   Watchlist,
   Category,
   Importance,
@@ -79,6 +80,16 @@ export const api = {
   triggerRun(): Promise<{ status: string }> {
     return request<{ status: string }>("/api/runs", {
       method: "POST",
+    });
+  },
+
+  resolveSource(
+    type: SourceType,
+    url: string
+  ): Promise<{ channel_id?: string | null; url?: string | null; name?: string | null }> {
+    return request("/api/sources/resolve", {
+      method: "POST",
+      body: JSON.stringify({ type, url }),
     });
   },
 };

@@ -15,3 +15,14 @@ class DashboardOut(BaseModel):
 class RunDetail(BaseModel):
     run: DigestRun
     items: list[NewsItem]
+
+
+class ResolveIn(BaseModel):
+    type: str
+    url: str
+
+
+class ResolveOut(BaseModel):
+    channel_id: str | None = None
+    url: str | None = None
+    name: str | None = None

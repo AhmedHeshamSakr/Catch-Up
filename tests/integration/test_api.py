@@ -100,3 +100,128 @@ def test_trigger_run_calls_injected_fn(tmp_path):
     r = c.post("/api/runs")
     assert r.status_code == 202
     assert called["n"] == 1  # BackgroundTasks runs after response in TestClient
+
+
+# ---------------------------------------------------------------------------
+# /api/sources/resolve tests (fully offline — injected fakes, no network)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def resolve_client(tmp_path):
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "sources.yaml").write_text("sources: []\n", encoding="utf-8")
+    (cfg / "watchlist.yaml").write_text("entities: []\nkeywords: []\n", encoding="utf-8")
+    settings = Settings(
+        sqlite_path=str(tmp_path / "db.sqlite"),
+        config_dir=str(cfg),
+        output_dir=str(tmp_path / "out"),
+    )
+    app = create_app(
+        settings,
+        run_digest_fn=lambda **kw: None,
+        resolve_channel_id_fn=lambda u: "UCxyz",
+        discover_feed_fn=lambda u: "https://p.com/feed.xml",
+    )
+    return TestClient(app)
+
+
+def test_resolve_youtube_success(resolve_client):
+    r = resolve_client.post(
+        "/api/sources/resolve",
+        json={"type": "youtube", "url": "https://youtube.com/@x"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["channel_id"] == "UCxyz"
+
+
+def test_resolve_rss_success(resolve_client):
+    r = resolve_client.post(
+        "/api/sources/resolve",
+        json={"type": "rss", "url": "https://some-newspaper.com/"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["url"] == "https://p.com/feed.xml"
+
+
+def test_resolve_youtube_returns_none_yields_422(tmp_path):
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "sources.yaml").write_text("sources: []\n", encoding="utf-8")
+    (cfg / "watchlist.yaml").write_text("entities: []\nkeywords: []\n", encoding="utf-8")
+    settings = Settings(
+        sqlite_path=str(tmp_path / "db.sqlite"),
+        config_dir=str(cfg),
+        output_dir=str(tmp_path / "out"),
+    )
+    app = create_app(
+        settings,
+        run_digest_fn=lambda **kw: None,
+        resolve_channel_id_fn=lambda u: None,
+        discover_feed_fn=lambda u: None,
+    )
+    c = TestClient(app)
+    r = c.post("/api/sources/resolve", json={"type": "youtube", "url": "https://youtube.com/@bad"})
+    assert r.status_code == 422
+
+
+def test_resolve_rss_returns_none_yields_422(tmp_path):
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "sources.yaml").write_text("sources: []\n", encoding="utf-8")
+    (cfg / "watchlist.yaml").write_text("entities: []\nkeywords: []\n", encoding="utf-8")
+    settings = Settings(
+        sqlite_path=str(tmp_path / "db.sqlite"),
+        config_dir=str(cfg),
+        output_dir=str(tmp_path / "out"),
+    )
+    app = create_app(
+        settings,
+        run_digest_fn=lambda **kw: None,
+        resolve_channel_id_fn=lambda u: None,
+        discover_feed_fn=lambda u: None,
+    )
+    c = TestClient(app)
+    r = c.post("/api/sources/resolve", json={"type": "rss", "url": "https://no-feed.com/"})
+    assert r.status_code == 422
+
+
+def test_resolve_unsupported_type_yields_400(resolve_client):
+    r = resolve_client.post(
+        "/api/sources/resolve",
+        json={"type": "scrape", "url": "https://example.com/"},
+    )
+    assert r.status_code == 400
+
+
+def test_resolve_exception_mapped_to_422(tmp_path):
+    """Exceptions from the resolver function are mapped to 422 (not 500)."""
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "sources.yaml").write_text("sources: []\n", encoding="utf-8")
+    (cfg / "watchlist.yaml").write_text("entities: []\nkeywords: []\n", encoding="utf-8")
+    settings = Settings(
+        sqlite_path=str(tmp_path / "db.sqlite"),
+        config_dir=str(cfg),
+        output_dir=str(tmp_path / "out"),
+    )
+
+    def boom(u):
+        raise ValueError("SSRF: private address")
+
+    app = create_app(
+        settings,
+        run_digest_fn=lambda **kw: None,
+        resolve_channel_id_fn=boom,
+        discover_feed_fn=boom,
+    )
+    c = TestClient(app, raise_server_exceptions=False)
+    r = c.post("/api/sources/resolve", json={"type": "youtube", "url": "http://192.168.1.1/"})
+    assert r.status_code == 422
+    assert "SSRF" in r.json()["detail"]
+
+    r2 = c.post("/api/sources/resolve", json={"type": "rss", "url": "http://192.168.1.1/"})
+    assert r2.status_code == 422
+    assert "SSRF" in r2.json()["detail"]

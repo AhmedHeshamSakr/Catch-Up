@@ -177,7 +177,14 @@ Executed subagent-driven on `feat/quality-safety-net` (stacked on PR #8). Plan: 
 - **Result:** `uv run pytest tests -q` → **152 passed** (offline); `uv run --extra lint ruff check app tests scripts` clean. Every commit authored solely by AhmedHeshamSakr.
 - **Deferred (needs Gemini quota):** live `adk_judge`/`adk_critique`; `scripts/eval_enrichment.py --live`; AR-dimension judging (Arabic-capable judge model).
 
+### Phase: Live dev test + "paste-a-link" source resolution ✅
+- Ran the full stack for the user (`app.cli serve` :8000 + `npm run dev` :3000). UX question surfaced: adding a newspaper/YouTube channel via the console required the exact RSS feed URL / `UC…` id — not a plain link. (Also noticed: the console's PUT round-trip reformats `config/sources.yaml` and drops comments — known YAML-writer limitation; reverted the test-time reformat.)
+- Built **paste-a-link resolution** on `feat/source-resolve` (stacked on #9). Plan: `docs/superpowers/plans/2026-05-24-source-resolve.md`.
+  - **L1 — Backend** (`16f3fa8`): `app/services/feed_discovery.py` (`discover_feed` — SSRF-guarded, BeautifulSoup `<link rel=alternate type=rss/atom>` → absolute feed URL, injectable fetch); `POST /api/sources/resolve` (`ResolveIn`/`ResolveOut`; youtube→`resolve_channel_id`, rss→`discover_feed`; both injectable into `create_app`; errors mapped to 422). 14 offline tests.
+  - **L2 — Console** (`78c5c64`): `api.resolveSource(type,url)`; a "paste a link" row + **Resolve** button in the Sources form (youtube/rss) that auto-fills `channel_id`/`url` (+name), with toasts. 43 frontend tests.
+  - **Result:** backend **166 passed**, frontend **43 passed**; ruff/tsc/lint/build clean. Commits authored AhmedHeshamSakr.
+
 ### Next
-- **PR #8** (youtube) + **PR #9** (quality safety net, stacked on #8) — open for review/merge (merge #8 first).
-- Then **Plan 8 — orchestration** (full ADK `SequentialAgent`/`ParallelAgent` tree wiring `root_agent`; the critic becomes a node; retire the dead weather `root_agent`) · **Plan 9 — GCP prod**.
-- **Deferred access:** X (paid API / RSS bridge) + LinkedIn (compliant provider) monitoring; console screens needing new endpoints (Categories, Pipeline, Schedule, Settings); live spikes (Plan 7 grounding; YouTube summary + Whisper).
+- **Open PRs (merge in order):** #8 youtube → #9 quality safety net → #10 source-resolve. Stack is deep — recommend merging the chain soon.
+- **Paused mid-design:** **Plan 8 — orchestration** (ADK `SequentialAgent`/`ParallelAgent` tree wiring `root_agent`; retire the dead weather `root_agent`; Option C — additive tree, keep `run_digest`). Plan doc written (`docs/superpowers/plans/2026-05-24-plan8-orchestration.md`, currently untracked — commit on `feat/orchestration` when resumed). Then **Plan 9 — GCP prod**.
+- **Deferred access:** X (paid API / RSS bridge) + LinkedIn (compliant provider) monitoring; console screens needing new endpoints; live spikes (Plan 7 grounding; YouTube summary + Whisper; eval/critic live).
