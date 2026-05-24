@@ -5,7 +5,14 @@ from datetime import UTC, datetime
 
 from app.adapters.storage.sqlite_backend import SqliteBackend
 from app.core.config import Settings, SourceConfig, load_sources
-from app.core.domain import DigestRun, Importance, RawItem, RunStatus, SourceType
+from app.core.domain import (
+    DigestRun,
+    Importance,
+    NewsItem,
+    RawItem,
+    RunStatus,
+    SourceType,
+)
 from app.core.ports.storage import StorageBackend
 from app.pipeline import critic as critic_module
 from app.pipeline import digest_editor, processing
@@ -46,6 +53,11 @@ def _default_narrator(settings: Settings):
 
 def _default_critic(settings: Settings):
     return lambda items: critic_module.adk_critique(items, settings)
+
+
+def select_rendered(items: list[NewsItem]) -> list[NewsItem]:
+    """Select items to render: processed items, or all non-flagged if none processed."""
+    return [i for i in items if i.status == "processed"] or [i for i in items if i.status != "flagged"]
 
 
 def run_digest(
@@ -111,7 +123,7 @@ def run_digest(
         run.high_importance = sum(1 for i in new_items if i.importance == Importance.HIGH)
         storage.save_items(new_items)
 
-        rendered = [i for i in new_items if i.status == "processed"] or [i for i in new_items if i.status != "flagged"]
+        rendered = select_rendered(new_items)
         try:
             run.narrative = narrator(rendered) if rendered else None
         except Exception as exc:

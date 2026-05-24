@@ -1,0 +1,433 @@
+"""ADK agent wrappers for the NewsCatchUp pipeline.
+
+Each wrapper is a thin BaseAgent subclass that reads state from
+ctx.session.state, calls the existing proven functions, and writes
+results back to state. No LLM calls — all orchestration logic only.
+"""
+from __future__ import annotations
+
+from collections.abc import AsyncGenerator, Callable
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
+
+from google.adk.agents import ParallelAgent, SequentialAgent
+from google.adk.agents.base_agent import BaseAgent
+from google.adk.events.event import Event
+from google.adk.events.event_actions import EventActions
+from pydantic import ConfigDict
+
+from app.core.config import Settings, load_sources
+from app.core.domain import DigestRun, Importance, NewsItem, RunStatus, SourceType
+from app.core.ports.storage import StorageBackend
+from app.pipeline.critic import apply_verdicts, select_for_critique
+from app.pipeline.processing import process_items
+from app.services import normalize as normalize_svc
+from app.services.render import excel, markdown
+from app.services.render import html as html_render
+from app.services.watchlist import load_watchlist
+
+if TYPE_CHECKING:
+    from google.adk.agents.invocation_context import InvocationContext
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _now() -> str:
+    """ISO timestamp for error entries."""
+    return datetime.now(UTC).isoformat()
+
+
+def _now_dt() -> datetime:
+    return datetime.now(UTC)
+
+
+def _make_event(ctx: Any, author: str, state_delta: dict | None = None) -> Event:
+    """Build a minimal pipeline event, optionally carrying a state_delta."""
+    actions = EventActions(state_delta=state_delta or {})
+    return Event(
+        invocation_id=ctx.invocation_id,
+        author=author,
+        branch=ctx.branch,
+        actions=actions,
+    )
+
+
+# ---------------------------------------------------------------------------
+# PipelineInitAgent
+# ---------------------------------------------------------------------------
+
+class PipelineInitAgent(BaseAgent):
+    """Seeds DigestRun and watchlist into session state."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
+    settings: Settings
+    storage: StorageBackend
+
+    async def _run_async_impl(
+        self, ctx: InvocationContext
+    ) -> AsyncGenerator[Event, None]:
+        state = ctx.session.state
+        run_id = state.get("run_id")
+        if not run_id:
+            import uuid
+
+            run_id = uuid.uuid4().hex[:12]
+            state["run_id"] = run_id
+        run = DigestRun(run_id=run_id)
+        self.storage.create_run(run)
+
+        wl = load_watchlist(self.settings.config_dir)
+
+        state["run"] = run
+        state["watchlist"] = wl
+        state["settings"] = self.settings
+
+        yield _make_event(ctx, self.name)
+
+
+# ---------------------------------------------------------------------------
+# SourceCollectorAgent
+# ---------------------------------------------------------------------------
+
+class SourceCollectorAgent(BaseAgent):
+    """Collects raw items from one source type into a dedicated state key."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
+    source_type: SourceType
+    state_key: str
+    settings: Settings
+    storage: StorageBackend
+    collect_fn: Callable
+
+    async def _run_async_impl(
+        self, ctx: InvocationContext
+    ) -> AsyncGenerator[Event, None]:
+        state = ctx.session.state
+        run: DigestRun = state["run"]
+        raws = []
+
+        for source in load_sources(self.settings.config_dir):
+            if not source.enabled:
+                continue
+            if source.type != self.source_type:
+                continue
+            try:
+                raws.extend(self.collect_fn(source, self.settings, self.storage))
+            except Exception as exc:
+                run.source_errors.append(
+                    {"source_id": source.id, "error": str(exc), "ts": _now()}
+                )
+
+        state[self.state_key] = raws
+
+        yield _make_event(ctx, self.name)
+
+
+# ---------------------------------------------------------------------------
+# NormalizeDedupAgent
+# ---------------------------------------------------------------------------
+
+class NormalizeDedupAgent(BaseAgent):
+    """Merges all raws_* keys, normalizes and deduplicates them."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
+    settings: Settings
+    storage: StorageBackend
+
+    async def _run_async_impl(
+        self, ctx: InvocationContext
+    ) -> AsyncGenerator[Event, None]:
+        state = ctx.session.state
+        run: DigestRun = state["run"]
+
+        all_raws = []
+        for key in ("raws_rss", "raws_scrape", "raws_api", "raws_search", "raws_youtube"):
+            all_raws.extend(state.get(key) or [])
+
+        run.collected = len(all_raws)
+        items = normalize_svc.normalize_and_dedup(all_raws, self.storage, run.run_id)
+        run.new = len(items)
+        state["items"] = items
+
+        yield _make_event(ctx, self.name)
+
+
+# ---------------------------------------------------------------------------
+# ProcessingAgent
+# ---------------------------------------------------------------------------
+
+class ProcessingAgent(BaseAgent):
+    """Runs the enrichment processor over all items."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
+    settings: Settings
+    storage: StorageBackend
+    processor: Callable
+
+    async def _run_async_impl(
+        self, ctx: InvocationContext
+    ) -> AsyncGenerator[Event, None]:
+        state = ctx.session.state
+        run: DigestRun = state["run"]
+        items: list[NewsItem] = state.get("items") or []
+        watchlist = state["watchlist"]
+
+        try:
+            process_items(
+                items,
+                self.processor,
+                watchlist,
+                self.settings.importance_threshold,
+                self.settings.llm_batch_size,
+            )
+        except Exception as exc:
+            run.source_errors.append(
+                {"stage": "processing", "error": str(exc), "ts": _now()}
+            )
+
+        yield _make_event(ctx, self.name)
+
+
+# ---------------------------------------------------------------------------
+# GuardrailCriticAgent
+# ---------------------------------------------------------------------------
+
+class GuardrailCriticAgent(BaseAgent):
+    """Runs the faithfulness critic and applies verdicts."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
+    settings: Settings
+    storage: StorageBackend
+    critic: Callable
+
+    async def _run_async_impl(
+        self, ctx: InvocationContext
+    ) -> AsyncGenerator[Event, None]:
+        state = ctx.session.state
+        run: DigestRun = state["run"]
+        items: list[NewsItem] = state.get("items") or []
+        watchlist = state["watchlist"]
+
+        try:
+            selected = select_for_critique(items, watchlist, self.settings)
+            if selected:
+                verdicts = self.critic(selected)
+                outcome = apply_verdicts(
+                    selected,
+                    verdicts,
+                    self.settings.critic_action,
+                    self.settings.importance_threshold,
+                )
+                run.flagged = outcome["flagged"]
+                run.critic_verdicts = outcome["verdicts"]
+        except Exception as exc:
+            run.source_errors.append(
+                {"stage": "critic", "error": str(exc), "ts": _now()}
+            )
+
+        yield _make_event(ctx, self.name)
+
+
+# ---------------------------------------------------------------------------
+# DigestEditorAgent
+# ---------------------------------------------------------------------------
+
+class DigestEditorAgent(BaseAgent):
+    """Generates the narrative digest summary."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
+    settings: Settings
+    storage: StorageBackend
+    narrator: Callable
+
+    async def _run_async_impl(
+        self, ctx: InvocationContext
+    ) -> AsyncGenerator[Event, None]:
+        from app.runner import select_rendered
+
+        state = ctx.session.state
+        run: DigestRun = state["run"]
+        items: list[NewsItem] = state.get("items") or []
+        rendered = select_rendered(items)
+
+        try:
+            run.narrative = self.narrator(rendered) if rendered else None
+        except Exception as exc:
+            run.source_errors.append(
+                {"stage": "narrative", "error": str(exc), "ts": _now()}
+            )
+
+        state["narrative"] = run.narrative
+
+        yield _make_event(ctx, self.name)
+
+
+# ---------------------------------------------------------------------------
+# RenderAgent
+# ---------------------------------------------------------------------------
+
+class RenderAgent(BaseAgent):
+    """Writes all output files and finalizes the run."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
+    settings: Settings
+    storage: StorageBackend
+
+    async def _run_async_impl(
+        self, ctx: InvocationContext
+    ) -> AsyncGenerator[Event, None]:
+        from app.runner import select_rendered
+
+        state = ctx.session.state
+        run: DigestRun = state["run"]
+        items: list[NewsItem] = state.get("items") or []
+
+        run.processed = sum(1 for i in items if i.status == "processed")
+        run.high_importance = sum(1 for i in items if i.importance == Importance.HIGH)
+        self.storage.save_items(items)
+
+        rendered = select_rendered(items)
+
+        # Render failures propagate (no try/except)
+        run.outputs["md"] = markdown.write_markdown(run, rendered, self.settings.output_dir)
+        run.outputs["xlsx"] = excel.write_excel(run, rendered, self.settings.output_dir)
+        run.outputs["html"] = html_render.write_html(run, rendered, self.settings.output_dir)
+
+        run.status = RunStatus.PARTIAL if run.source_errors else RunStatus.SUCCESS
+        run.finished_at = _now_dt()
+        self.storage.finalize_run(run)
+
+        yield _make_event(ctx, self.name)
+
+
+# ---------------------------------------------------------------------------
+# build_pipeline factory
+# ---------------------------------------------------------------------------
+
+def build_pipeline(
+    settings: Settings,
+    storage: StorageBackend,
+    *,
+    run_id: str | None = None,
+    collect_fn: Callable | None = None,
+    processor: Callable | None = None,
+    narrator: Callable | None = None,
+    critic: Callable | None = None,
+) -> SequentialAgent:
+    """Build and return the full NewsCatchUpPipeline SequentialAgent.
+
+    The caller seeds run_id into session state before invoking the pipeline:
+        session = await runner.session_service.create_session(
+            ..., state={"run_id": run_id}
+        )
+
+    The build_pipeline `run_id` param is accepted for forward compatibility
+    but unused here — PipelineInitAgent reads it from ctx.session.state.
+    """
+    # Deferred imports to avoid circular import at module load time
+    from app.runner import (
+        _collect,
+        _default_critic,
+        _default_narrator,
+        _default_processor,
+    )
+
+    _collect_fn = collect_fn or _collect
+    _processor = processor or _default_processor(settings)
+    _narrator = narrator or _default_narrator(settings)
+    _critic = critic or _default_critic(settings)
+
+    collect_sources = ParallelAgent(
+        name="CollectSources",
+        sub_agents=[
+            SourceCollectorAgent(
+                name="CollectRss",
+                source_type=SourceType.RSS,
+                state_key="raws_rss",
+                settings=settings,
+                storage=storage,
+                collect_fn=_collect_fn,
+            ),
+            SourceCollectorAgent(
+                name="CollectScrape",
+                source_type=SourceType.SCRAPE,
+                state_key="raws_scrape",
+                settings=settings,
+                storage=storage,
+                collect_fn=_collect_fn,
+            ),
+            SourceCollectorAgent(
+                name="CollectApi",
+                source_type=SourceType.API,
+                state_key="raws_api",
+                settings=settings,
+                storage=storage,
+                collect_fn=_collect_fn,
+            ),
+            SourceCollectorAgent(
+                name="CollectSearch",
+                source_type=SourceType.SEARCH,
+                state_key="raws_search",
+                settings=settings,
+                storage=storage,
+                collect_fn=_collect_fn,
+            ),
+            SourceCollectorAgent(
+                name="CollectYoutube",
+                source_type=SourceType.YOUTUBE,
+                state_key="raws_youtube",
+                settings=settings,
+                storage=storage,
+                collect_fn=_collect_fn,
+            ),
+        ],
+    )
+
+    return SequentialAgent(
+        name="NewsCatchUpPipeline",
+        sub_agents=[
+            PipelineInitAgent(
+                name="PipelineInit",
+                settings=settings,
+                storage=storage,
+            ),
+            collect_sources,
+            NormalizeDedupAgent(
+                name="NormalizeDedup",
+                settings=settings,
+                storage=storage,
+            ),
+            ProcessingAgent(
+                name="Processing",
+                settings=settings,
+                storage=storage,
+                processor=_processor,
+            ),
+            GuardrailCriticAgent(
+                name="GuardrailCritic",
+                settings=settings,
+                storage=storage,
+                critic=_critic,
+            ),
+            DigestEditorAgent(
+                name="DigestEditor",
+                settings=settings,
+                storage=storage,
+                narrator=_narrator,
+            ),
+            RenderAgent(
+                name="Render",
+                settings=settings,
+                storage=storage,
+            ),
+        ],
+    )
