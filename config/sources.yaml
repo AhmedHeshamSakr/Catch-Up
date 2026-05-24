@@ -59,3 +59,9 @@ sources:
     query: "most important AI and technology breakthroughs this week"
     category_hint: ai_tech
     enabled: false   # enable once Gemini quota is available — consumes model calls
+  - id: youtube-mkbhd
+    type: youtube
+    name: MKBHD (YouTube)
+    channel_id: UCBJycsmduvYEL83R_U4JriQ
+    category_hint: ai_tech
+    enabled: false   # enable when you want video monitoring (transcript lib free; summary needs Gemini)

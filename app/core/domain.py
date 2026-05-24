@@ -15,6 +15,7 @@ class SourceType(StrEnum):
     SCRAPE = "scrape"
     API = "api"
     SEARCH = "search"
+    YOUTUBE = "youtube"
 
 
 class Category(StrEnum):
