@@ -25,7 +25,7 @@ class SourceConfig(BaseModel):
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=("app/.env", ".env"), extra="ignore")
 
     google_api_key: str = ""
     storage_backend: str = "sqlite"
