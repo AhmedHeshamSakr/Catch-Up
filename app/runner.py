@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, datetime
 
+from google.adk.runners import InMemoryRunner
+from google.genai import types
+
 from app.adapters.storage.sqlite_backend import SqliteBackend
-from app.core.config import Settings, SourceConfig, load_sources
+from app.core.config import Settings, SourceConfig
 from app.core.domain import (
     DigestRun,
-    Importance,
     NewsItem,
     RawItem,
     RunStatus,
@@ -16,11 +19,16 @@ from app.core.domain import (
 from app.core.ports.storage import StorageBackend
 from app.pipeline import critic as critic_module
 from app.pipeline import digest_editor, processing
-from app.pipeline.critic import apply_verdicts, select_for_critique
-from app.services import newsapi, normalize, rss, scrape, search, youtube
-from app.services.render import excel, markdown
-from app.services.render import html as html_render
-from app.services.watchlist import load_watchlist
+from app.services import (  # noqa: F401 — monkeypatch targets
+    newsapi,
+    normalize,
+    rss,
+    scrape,
+    search,
+    youtube,
+)
+from app.services.render import excel, markdown  # noqa: F401 — monkeypatch targets
+from app.services.render import html as html_render  # noqa: F401 — monkeypatch target
 
 
 def build_storage(settings: Settings) -> StorageBackend:
@@ -60,6 +68,16 @@ def select_rendered(items: list[NewsItem]) -> list[NewsItem]:
     return [i for i in items if i.status == "processed"] or [i for i in items if i.status != "flagged"]
 
 
+async def _run_tree(tree, run_id: str) -> None:
+    runner = InMemoryRunner(agent=tree, app_name="catchup")
+    session = await runner.session_service.create_session(
+        app_name="catchup", user_id="system", state={"run_id": run_id}
+    )
+    msg = types.Content(role="user", parts=[types.Part.from_text(text="run")])
+    async for _ in runner.run_async(user_id="system", session_id=session.id, new_message=msg):
+        pass
+
+
 def run_digest(
     settings: Settings | None = None,
     storage: StorageBackend | None = None,
@@ -67,80 +85,26 @@ def run_digest(
     narrator=None,
     critic=None,
 ) -> DigestRun:
+    from app.pipeline.agents import build_pipeline
+
     settings = settings or Settings()
     storage = storage or build_storage(settings)
-    processor = processor or _default_processor(settings)
-    narrator = narrator or _default_narrator(settings)
-    critic = critic or _default_critic(settings)
-
-    run = DigestRun(run_id=uuid.uuid4().hex[:12])
-    storage.create_run(run)
-
+    run_id = uuid.uuid4().hex[:12]
+    tree = build_pipeline(
+        settings, storage,
+        run_id=run_id,
+        processor=processor,
+        narrator=narrator,
+        critic=critic,
+    )
     try:
-        raws: list[RawItem] = []
-        for source in load_sources(settings.config_dir):
-            if not source.enabled:
-                continue
-            try:
-                raws.extend(_collect(source, settings, storage))
-            except Exception as exc:  # per-source isolation
-                run.source_errors.append(
-                    {
-                        "source_id": source.id,
-                        "error": str(exc),
-                        "ts": datetime.now(UTC).isoformat(),
-                    }
-                )
-
-        run.collected = len(raws)
-        new_items = normalize.normalize_and_dedup(raws, storage, run.run_id)
-
-        watchlist = load_watchlist(settings.config_dir)
-
-        # --- Intelligence (graceful degradation: collection already succeeded) ---
-        try:
-            processing.process_items(
-                new_items, processor, watchlist,
-                settings.importance_threshold, settings.llm_batch_size)
-        except Exception as exc:
-            run.source_errors.append(
-                {"stage": "processing", "error": str(exc), "ts": datetime.now(UTC).isoformat()})
-
-        # --- Faithfulness guardrail (graceful degradation) ---
-        try:
-            selected = select_for_critique(new_items, watchlist, settings)
-            if selected:
-                verdicts = critic(selected)
-                outcome = apply_verdicts(selected, verdicts, settings.critic_action, settings.importance_threshold)
-                run.flagged = outcome["flagged"]
-                run.critic_verdicts = outcome["verdicts"]
-        except Exception as exc:
-            run.source_errors.append(
-                {"stage": "critic", "error": str(exc), "ts": datetime.now(UTC).isoformat()})
-
-        run.new = len(new_items)
-        run.processed = sum(1 for i in new_items if i.status == "processed")
-        run.high_importance = sum(1 for i in new_items if i.importance == Importance.HIGH)
-        storage.save_items(new_items)
-
-        rendered = select_rendered(new_items)
-        try:
-            run.narrative = narrator(rendered) if rendered else None
-        except Exception as exc:
-            run.source_errors.append(
-                {"stage": "narrative", "error": str(exc), "ts": datetime.now(UTC).isoformat()})
-        run.outputs["md"] = markdown.write_markdown(run, rendered, settings.output_dir)
-        run.outputs["xlsx"] = excel.write_excel(run, rendered, settings.output_dir)
-        run.outputs["html"] = html_render.write_html(run, rendered, settings.output_dir)
-
-        run.status = RunStatus.PARTIAL if run.source_errors else RunStatus.SUCCESS
-        run.finished_at = datetime.now(UTC)
-        storage.finalize_run(run)
+        asyncio.run(_run_tree(tree, run_id))
     except Exception as exc:
-        run.status = RunStatus.FAILED
-        run.finished_at = datetime.now(UTC)
-        run.source_errors.append({"error": str(exc), "ts": datetime.now(UTC).isoformat()})
-        storage.finalize_run(run)
+        run = storage.get_run(run_id)
+        if run is not None:
+            run.status = RunStatus.FAILED
+            run.finished_at = datetime.now(UTC)
+            run.source_errors.append({"error": str(exc), "ts": datetime.now(UTC).isoformat()})
+            storage.finalize_run(run)
         raise
-
-    return run
+    return storage.get_run(run_id)
