@@ -45,6 +45,13 @@ uv run python -m app.cli run
 Sources live in `config/sources.yaml` — each has a `type`: **`rss`**, **`api`** (GNews; set `query`, optional `lang`/`country`), **`scrape`** (set a CSS `selector`), **`search`** (Google Search grounding via ADK `google_search`; set a `query`), or **`youtube`** (monitor a channel; set its `channel_id`, the `UC…` id). Search sources need `GOOGLE_API_KEY` and consume model calls, so they ship **disabled by default**; their results link via Google grounding-redirect URLs and carry no publish date. YouTube sources detect new uploads via the channel's free RSS feed (no key) and summarize each video's transcript (`youtube-transcript-api`, with an optional Whisper fallback behind the `whisper` extra; the transcript summary needs `GOOGLE_API_KEY`) — also disabled by default. The GNews collector needs `GNEWS_API_KEY` (`export GNEWS_API_KEY=...` or `.env`). Importance-boost entities/keywords live in `config/watchlist.yaml`.
 Without keys, collection/dedup/storage still run and the digest degrades gracefully (items unenriched); scrape URLs are SSRF-guarded (public hosts only).
 
+## Quality & faithfulness
+
+Two LLM-as-judge safeguards protect summary quality (both build/test offline; live runs need `GOOGLE_API_KEY`):
+
+- **Offline eval loop** — `uv run python scripts/eval_enrichment.py --live` scores enrichment against a reference dataset (`tests/eval/fixtures/`) on four dimensions: **summary faithfulness** (no hallucination/obeyed-injection), category accuracy, importance calibration, and Arabic translation quality, with pass/fail thresholds. See `docs/eval/README.md` for the eval-fix loop.
+- **Runtime faithfulness guardrail** — at digest time a critic fact-checks **HIGH-importance and watchlisted** items against their source; unfaithful summaries are **down-ranked + flagged** (never shown), configurable via `critic_*` settings. Both the judge and the critic share one rubric (`app/prompts/faithfulness_rubric.md`).
+
 Each run emits three output files: `output/digest-<id>.md`, `output/digest-<id>.xlsx` (master + per-category sheets), and `output/digest-<id>.html` (Signal-themed dashboard). To generate sample outputs with no API key:
 
 ```bash

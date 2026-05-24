@@ -116,3 +116,5 @@ class DigestRun(BaseModel):
     outputs: dict[str, str] = Field(default_factory=dict)
     source_errors: list[dict] = Field(default_factory=list)
     narrative: str | None = None
+    flagged: int = 0
+    critic_verdicts: list[dict] = Field(default_factory=list)
