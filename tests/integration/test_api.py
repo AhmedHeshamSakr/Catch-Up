@@ -76,6 +76,47 @@ def test_dashboard_news_runs(tmp_path):
     assert len(high) == 1 and high[0]["title"] == "AI item"
 
 
+def test_news_runs_limit_over_cap_returns_422(client):
+    # limit above the 200 cap is rejected by FastAPI Query validation.
+    assert client.get("/api/news", params={"limit": 9999}).status_code == 422
+    assert client.get("/api/runs", params={"limit": 9999}).status_code == 422
+    # limit below 1 and negative offset are also rejected.
+    assert client.get("/api/news", params={"limit": 0}).status_code == 422
+    assert client.get("/api/news", params={"offset": -1}).status_code == 422
+
+
+def test_news_valid_limit_and_offset(tmp_path):
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "sources.yaml").write_text("sources: []\n", encoding="utf-8")
+    (cfg / "watchlist.yaml").write_text("entities: []\nkeywords: []\n", encoding="utf-8")
+    settings = Settings(sqlite_path=str(tmp_path / "db.sqlite"),
+                        config_dir=str(cfg), output_dir=str(tmp_path / "out"))
+
+    from datetime import UTC, datetime
+    st = SqliteBackend(settings.sqlite_path)
+    st.init_schema()
+    items = []
+    for i in range(3):
+        raw = RawItem(source_id="s", source_type=SourceType.RSS, source_name="S",
+                      url=f"https://a/{i}", title=f"item {i}")
+        it = NewsItem.from_raw(raw, run_id="r1")
+        it.category = Category.AI_TECH
+        it.collected_at = datetime(2026, 5, 21 + i, tzinfo=UTC)
+        items.append(it)
+    st.save_items(items)
+
+    app = create_app(settings, run_digest_fn=lambda **kw: None)
+    c = TestClient(app)
+
+    # limit caps the page size; newest collected_at first.
+    page = c.get("/api/news", params={"limit": 2}).json()
+    assert [i["url"] for i in page] == ["https://a/2", "https://a/1"]
+    # offset skips the first result.
+    page2 = c.get("/api/news", params={"limit": 2, "offset": 1}).json()
+    assert [i["url"] for i in page2] == ["https://a/1", "https://a/0"]
+
+
 def test_sources_and_watchlist_crud(client):
     payload = [{"id": "x", "type": "rss", "name": "X", "url": "https://x/feed",
                 "category_hint": "ai_tech", "enabled": True}]

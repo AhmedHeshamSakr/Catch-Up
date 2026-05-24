@@ -104,3 +104,16 @@ class StorageContract:
         assert [i.url for i in both] == ["https://a/2", "https://a/1"]
         # limit respected
         assert len(self.backend.list_news(limit=1)) == 1
+        # offset skips the newest item
+        assert [i.url for i in self.backend.list_news(limit=1, offset=1)] == ["https://a/3"]
+
+    def test_list_runs_offset_paginates(self):
+        from datetime import UTC, datetime
+
+        from app.core.domain import DigestRun
+        for i, rid in enumerate(["r1", "r2", "r3"]):
+            run = DigestRun(run_id=rid, started_at=datetime(2026, 5, 20 + i, tzinfo=UTC))
+            self.backend.create_run(run)
+        # offset skips the newest run; ordering stays newest-first.
+        runs = self.backend.list_runs(limit=2, offset=1)
+        assert [r.run_id for r in runs] == ["r2", "r1"]

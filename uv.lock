@@ -230,6 +230,7 @@ dependencies = [
     { name = "opentelemetry-instrumentation-google-genai" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
+    { name = "ruamel-yaml" },
     { name = "youtube-transcript-api" },
 ]
 
@@ -269,6 +270,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-google-genai", specifier = ">=0.1.0,<1.0.0" },
     { name = "pydantic-settings", specifier = ">=2.14.1" },
     { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "ruamel-yaml", specifier = ">=0.18.0" },
     { name = "ruff", marker = "extra == 'lint'", specifier = ">=0.4.6,<1.0.0" },
     { name = "ty", marker = "extra == 'lint'", specifier = ">=0.0.1a0" },
     { name = "youtube-transcript-api", specifier = ">=1.2.4" },

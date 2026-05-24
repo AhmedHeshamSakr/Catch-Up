@@ -3,6 +3,15 @@
 Each wrapper is a thin BaseAgent subclass that reads state from
 ctx.session.state, calls the existing proven functions, and writes
 results back to state. No LLM calls — all orchestration logic only.
+
+State-propagation decision: the pipeline runs against a single in-process
+session (InMemoryRunner / InMemorySessionService), so agents mutate
+``ctx.session.state`` directly and emit a plain terminal Event with no
+``EventActions.state_delta``. This is intentional — the empty state_delta the
+runner would persist is dead plumbing here. When a persistent/distributed
+session service (Firestore / Vertex Agent Engine — Plan 9) is introduced,
+durable values that must survive across processes will need to move into
+``state_delta`` so the session service persists them.
 """
 from __future__ import annotations
 
@@ -14,7 +23,6 @@ from typing import TYPE_CHECKING, Any
 from google.adk.agents import ParallelAgent, SequentialAgent
 from google.adk.agents.base_agent import BaseAgent
 from google.adk.events.event import Event
-from google.adk.events.event_actions import EventActions
 from pydantic import ConfigDict
 
 from app.core.config import Settings, load_sources
@@ -51,14 +59,17 @@ def _now_dt() -> datetime:
     return datetime.now(UTC)
 
 
-def _make_event(ctx: Any, author: str, state_delta: dict | None = None) -> Event:
-    """Build a minimal pipeline event, optionally carrying a state_delta."""
-    actions = EventActions(state_delta=state_delta or {})
+def _make_event(ctx: Any, author: str) -> Event:
+    """Build a minimal terminal pipeline event.
+
+    Agents mutate ``ctx.session.state`` directly (single in-process session),
+    so no ``EventActions.state_delta`` is attached — see the module docstring
+    for the durable-session migration note.
+    """
     return Event(
         invocation_id=ctx.invocation_id,
         author=author,
         branch=ctx.branch,
-        actions=actions,
     )
 
 

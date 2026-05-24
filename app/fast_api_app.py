@@ -12,6 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""ADK deployment entrypoint (NOT the product REST API).
+
+This module exposes the ADK ``App``/agent over HTTP via
+``google.adk.cli.fast_api.get_fast_api_app`` so the agent can be served on
+Agent Engine / Cloud Run with the ADK web UI, session/artifact services, and
+the ``/feedback`` endpoint. It is the surface the ADK deployment tooling
+(``agents-cli deploy``, Dockerfile) targets.
+
+The canonical product REST API (``/api/...`` — dashboard, runs, news,
+sources, watchlist, resolve) lives in ``app/api/app.py`` ``create_app()`` and
+is what ``catchup serve`` runs. The two surfaces are intentionally distinct:
+this one wraps the *agent* for managed-runtime deployment; the other serves
+the *application's* HTTP API. They share no routes, so they cannot silently
+diverge.
+"""
+
 import os
 
 import google.auth

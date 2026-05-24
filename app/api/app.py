@@ -3,7 +3,15 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, Header, HTTPException
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+)
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.schemas import DashboardOut, ResolveIn, ResolveOut, RunDetail
@@ -15,6 +23,10 @@ from app.services.ratelimit import TokenBucket
 from app.services.watchlist import Watchlist, load_watchlist
 
 logger = logging.getLogger(__name__)
+
+# Cap on the number of news items pulled to compute dashboard category counts.
+# Bounded so the dashboard stays cheap; the full list is paginated via /api/news.
+_DASHBOARD_NEWS_LIMIT = 500
 
 
 def _require_api_key(settings: Settings):
@@ -83,7 +95,7 @@ def create_app(
     def dashboard() -> DashboardOut:
         st = storage()
         runs = st.list_runs(limit=10)
-        items = st.list_news(limit=500)
+        items = st.list_news(limit=_DASHBOARD_NEWS_LIMIT)
         counts: dict[str, int] = {}
         for it in items:
             if it.category:
@@ -96,8 +108,11 @@ def create_app(
         )
 
     @api.get("/runs")
-    def list_runs(limit: int = 20):
-        return storage().list_runs(limit=limit)
+    def list_runs(
+        limit: int = Query(50, ge=1, le=200),
+        offset: int = Query(0, ge=0),
+    ):
+        return storage().list_runs(limit=limit, offset=offset)
 
     @api.get("/runs/{run_id}", response_model=RunDetail)
     def get_run(run_id: str) -> RunDetail:
@@ -109,8 +124,11 @@ def create_app(
 
     @api.get("/news")
     def list_news(category: Category | None = None, importance: Importance | None = None,
-                  limit: int = 50):
-        return storage().list_news(category=category, importance=importance, limit=limit)
+                  limit: int = Query(50, ge=1, le=200),
+                  offset: int = Query(0, ge=0)):
+        return storage().list_news(
+            category=category, importance=importance, limit=limit, offset=offset
+        )
 
     @api.get("/sources")
     def get_sources():
