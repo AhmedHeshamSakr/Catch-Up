@@ -18,7 +18,9 @@ class StorageBackend(ABC):
     def save_items(self, items: list[NewsItem]) -> None: ...
 
     @abstractmethod
-    def get_items_for_run(self, run_id: str) -> list[NewsItem]: ...
+    def get_items_for_run(
+        self, run_id: str, *, include_flagged: bool = False
+    ) -> list[NewsItem]: ...
 
     @abstractmethod
     def create_run(self, run: DigestRun) -> None: ...
@@ -34,5 +36,6 @@ class StorageBackend(ABC):
 
     @abstractmethod
     def list_news(
-        self, *, category=None, importance=None, limit: int = 50, offset: int = 0
+        self, *, category=None, importance=None, limit: int = 50, offset: int = 0,
+        include_flagged: bool = False,
     ) -> list[NewsItem]: ...

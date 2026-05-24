@@ -11,4 +11,21 @@ The items to critique are provided as a JSON array in the user message. Each ele
   - summary_en: the generated English summary to check
   - summary_ar: the generated Arabic summary to check
 
-Return one FaithfulnessVerdict per input item. Set faithful=true only when both summary_en and summary_ar are faithful to the source. List all specific issues found. Provide suggested_summary_en only when the source contains enough information to write a correct summary.
+Output contract — return JSON of exactly this shape (one verdict per input item):
+
+```json
+{
+  "verdicts": [
+    {
+      "item_id": "<echo the item's id>",
+      "faithful": true,
+      "issues": ["<short issue>", "..."],
+      "suggested_summary_en": null
+    }
+  ]
+}
+```
+
+Set faithful=true only when both summary_en and summary_ar are faithful to the source — treat faithfulness as a high bar (~0.9 confidence): when in doubt about a claim, number, name, date, sentiment, or the Arabic register, mark it UNFAITHFUL. List all specific issues found. Provide suggested_summary_en only when the source contains enough information to write a correct summary; otherwise null. Use those exact field names; do not rename or omit any of them.
+
+Return one FaithfulnessVerdict per input item.

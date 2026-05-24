@@ -68,3 +68,33 @@ def test_collect_uses_injected_ground():
 
 def test_collect_returns_empty_when_ground_none():
     assert search_mod.collect(SRC, Settings(), ground=lambda src, s: None) == []
+
+
+# ---------------------------------------------------------------------------
+# Loop-aware sync->async bridge (no bare asyncio.run inside a running loop)
+# ---------------------------------------------------------------------------
+
+import asyncio  # noqa: E402
+
+
+def test_adk_ground_works_inside_running_loop(monkeypatch):
+    """adk_ground must use the shared loop-aware bridge, not a bare asyncio.run.
+
+    Driven from INSIDE a running event loop (mirrors the ADK tree path where
+    collectors run via asyncio.to_thread). A bare asyncio.run here would raise
+    RuntimeError; the shared bridge runs on a worker thread instead.
+    """
+    sentinel = GroundingMetadata(grounding_chunks=[])
+
+    async def _fake_ground_async(agent, query, *, app_name="catchup"):
+        return sentinel
+
+    monkeypatch.setattr(search_mod, "_ground_async", _fake_ground_async)
+    monkeypatch.setattr(search_mod, "ensure_api_key", lambda settings: None)
+    monkeypatch.setattr(search_mod, "build_search_agent", lambda model: object())
+
+    async def driver():
+        return search_mod.adk_ground(SRC, Settings())
+
+    result = asyncio.run(driver())
+    assert result is sentinel

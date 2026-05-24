@@ -107,6 +107,35 @@ class StorageContract:
         # offset skips the newest item
         assert [i.url for i in self.backend.list_news(limit=1, offset=1)] == ["https://a/3"]
 
+    def test_flagged_items_excluded_by_default(self):
+        from app.core.domain import NewsItem, RawItem, SourceType
+
+        def mk(url, status):
+            raw = RawItem(source_id="s", source_type=SourceType.RSS,
+                          source_name="S", url=url, title="t")
+            it = NewsItem.from_raw(raw, run_id="r1")
+            it.status = status
+            return it
+
+        self.backend.save_items([
+            mk("https://a/processed", "processed"),
+            mk("https://a/flagged", "flagged"),
+        ])
+
+        # list_news excludes flagged by default, includes it on request.
+        assert {i.url for i in self.backend.list_news()} == {"https://a/processed"}
+        assert {i.url for i in self.backend.list_news(include_flagged=True)} == {
+            "https://a/processed", "https://a/flagged",
+        }
+
+        # get_items_for_run excludes flagged by default, includes it on request.
+        assert {i.url for i in self.backend.get_items_for_run("r1")} == {
+            "https://a/processed",
+        }
+        assert {i.url for i in self.backend.get_items_for_run("r1", include_flagged=True)} == {
+            "https://a/processed", "https://a/flagged",
+        }
+
     def test_list_runs_offset_paginates(self):
         from datetime import UTC, datetime
 

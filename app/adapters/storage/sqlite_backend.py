@@ -12,6 +12,7 @@ class SqliteBackend(StorageBackend):
     # Columns added after the original schema — migrated in on existing DBs.
     _NEWS_COLUMNS: ClassVar[dict[str, str]] = {
         "category": "TEXT", "importance": "TEXT", "collected_at": "TEXT",
+        "status": "TEXT",
     }
     _RUN_COLUMNS: ClassVar[dict[str, str]] = {"started_at": "TEXT"}
 
@@ -38,7 +39,7 @@ class SqliteBackend(StorageBackend):
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS news_items ("
                 "id TEXT PRIMARY KEY, run_id TEXT, org_id TEXT, category TEXT, "
-                "importance TEXT, collected_at TEXT, data TEXT NOT NULL)"
+                "importance TEXT, collected_at TEXT, status TEXT, data TEXT NOT NULL)"
             )
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS digest_runs ("
@@ -48,7 +49,7 @@ class SqliteBackend(StorageBackend):
             # Migrate older databases that predate the query columns.
             self._ensure_columns(conn, "news_items", self._NEWS_COLUMNS)
             self._ensure_columns(conn, "digest_runs", self._RUN_COLUMNS)
-            for col in ("category", "importance", "collected_at", "run_id"):
+            for col in ("category", "importance", "collected_at", "run_id", "status"):
                 conn.execute(
                     f"CREATE INDEX IF NOT EXISTS idx_news_{col} ON news_items({col})"
                 )
@@ -70,25 +71,30 @@ class SqliteBackend(StorageBackend):
         with self._conn() as conn:
             conn.executemany(
                 "INSERT OR REPLACE INTO news_items "
-                "(id, run_id, org_id, category, importance, collected_at, data) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(id, run_id, org_id, category, importance, collected_at, status, data) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
                         i.id, i.digest_run_id, i.org_id,
                         i.category.value if i.category else None,
                         i.importance.value if i.importance else None,
                         i.collected_at.isoformat(),
+                        i.status,
                         i.model_dump_json(),
                     )
                     for i in items
                 ],
             )
 
-    def get_items_for_run(self, run_id: str) -> list[NewsItem]:
+    def get_items_for_run(
+        self, run_id: str, *, include_flagged: bool = False
+    ) -> list[NewsItem]:
+        sql = "SELECT data FROM news_items WHERE run_id = ?"
+        if not include_flagged:
+            # NULL status (rows predating the column) is treated as not-flagged.
+            sql += " AND (status IS NULL OR status != 'flagged')"
         with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT data FROM news_items WHERE run_id = ?", (run_id,)
-            ).fetchall()
+            rows = conn.execute(sql, (run_id,)).fetchall()
         return [NewsItem.model_validate_json(row["data"]) for row in rows]
 
     def create_run(self, run: DigestRun) -> None:
@@ -119,7 +125,8 @@ class SqliteBackend(StorageBackend):
         return [DigestRun.model_validate_json(r["data"]) for r in rows]
 
     def list_news(
-        self, *, category=None, importance=None, limit: int = 50, offset: int = 0
+        self, *, category=None, importance=None, limit: int = 50, offset: int = 0,
+        include_flagged: bool = False,
     ) -> list[NewsItem]:
         clauses, params = [], []
         if category is not None:
@@ -128,6 +135,9 @@ class SqliteBackend(StorageBackend):
         if importance is not None:
             clauses.append("importance = ?")
             params.append(importance.value)
+        if not include_flagged:
+            # NULL status (rows predating the column) is treated as not-flagged.
+            clauses.append("(status IS NULL OR status != 'flagged')")
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         params.extend([limit, offset])
         with self._conn() as conn:

@@ -65,6 +65,19 @@ def _news(url: str, title: str, run_id: str = "r1") -> NewsItem:
     return NewsItem.from_raw(_raw(url, title), run_id=run_id)
 
 
+def _fake_reprocessor(items, verdicts):
+    """Offline re-enrichment: still-unfaithful re-summary (keeps the reflection
+    loop offline for guardrail tests that exercise the unfaithful path)."""
+    return ProcessingResult(items=[
+        ItemEnrichment(
+            id=it.id, category=Category.AI_TECH, importance_score=0.9,
+            summary_en="Re-summary.", summary_ar="ملخص.",
+            entities=[], sentiment="neutral",
+        )
+        for it in items
+    ])
+
+
 def _settings(tmp_path, **kwargs) -> Settings:
     cfg = tmp_path / "config"
     cfg.mkdir(exist_ok=True)
@@ -460,6 +473,7 @@ async def test_guardrail_critic_flags_unfaithful_item(tmp_path):
         settings=settings,
         storage=storage,
         critic=fake_critic,
+        reprocessor=_fake_reprocessor,
     )
     await _run(agent, state)
 
@@ -494,6 +508,7 @@ async def test_guardrail_critic_faithful_item_untouched(tmp_path):
         settings=settings,
         storage=storage,
         critic=fake_critic,
+        reprocessor=_fake_reprocessor,
     )
     await _run(agent, state)
 
@@ -528,6 +543,7 @@ async def test_guardrail_critic_raises_adds_stage_error(tmp_path):
         settings=settings,
         storage=storage,
         critic=boom_critic,
+        reprocessor=_fake_reprocessor,
     )
     events = await _run(agent, state)
 
@@ -565,6 +581,7 @@ async def test_guardrail_critic_disabled_skips_selection(tmp_path):
         settings=settings,
         storage=storage,
         critic=tracking_critic,
+        reprocessor=_fake_reprocessor,
     )
     await _run(agent, state)
 
@@ -871,3 +888,60 @@ def test_build_pipeline_run_id_param_accepted(tmp_path):
 
     pipeline = build_pipeline(settings, storage, run_id="explicit-run-id")
     assert pipeline is not None
+
+
+# ---------------------------------------------------------------------------
+# SourceType -> state-key: single source of truth
+# ---------------------------------------------------------------------------
+
+from app.pipeline.agents import COLLECTED_SOURCE_TYPES, state_key_for  # noqa: E402
+
+
+def test_state_key_for_matches_existing_literals():
+    """state_key_for must reproduce the historical raws_* literals exactly so
+    storage and existing tests are unaffected."""
+    assert [state_key_for(t) for t in COLLECTED_SOURCE_TYPES] == [
+        "raws_rss", "raws_scrape", "raws_api", "raws_search", "raws_youtube"
+    ]
+    for t in COLLECTED_SOURCE_TYPES:
+        assert state_key_for(t) == f"raws_{t.value}"
+
+
+def test_collector_nodes_and_merge_derive_from_same_source(tmp_path):
+    """Every collected SourceType must have a collector node AND be merged by
+    NormalizeDedup — both derived from COLLECTED_SOURCE_TYPES, so a new type
+    can never be wired into one but silently dropped by the other."""
+    settings = _settings(tmp_path)
+    storage = _storage(tmp_path)
+
+    pipeline = build_pipeline(settings, storage)
+    collect_sources = pipeline.sub_agents[1]
+
+    node_types = {a.source_type for a in collect_sources.sub_agents}
+    node_keys = {a.state_key for a in collect_sources.sub_agents}
+
+    # Collector nodes cover exactly the source-of-truth set.
+    assert node_types == set(COLLECTED_SOURCE_TYPES)
+    # Their keys are exactly the keys the merge will read.
+    assert node_keys == {state_key_for(t) for t in COLLECTED_SOURCE_TYPES}
+
+
+@pytest.mark.asyncio
+async def test_normalize_dedup_merges_every_collected_source_type(tmp_path):
+    """Drive NormalizeDedup with one raw per collected SourceType and assert all
+    of them are merged (proves the merge iterates the same source-of-truth)."""
+    settings = _settings(tmp_path)
+    storage = _storage(tmp_path)
+
+    run = DigestRun(run_id="r1")
+    storage.create_run(run)
+
+    state: dict = {"run": run, "watchlist": Watchlist()}
+    for i, t in enumerate(COLLECTED_SOURCE_TYPES):
+        state[state_key_for(t)] = [_raw(f"https://merge.test/{i}", f"Item {t.value}", t)]
+
+    agent = NormalizeDedupAgent(name="NormalizeDedup", settings=settings, storage=storage)
+    await _run(agent, state)
+
+    assert run.collected == len(COLLECTED_SOURCE_TYPES)
+    assert len(state["items"]) == len(COLLECTED_SOURCE_TYPES)

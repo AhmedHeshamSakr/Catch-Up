@@ -50,6 +50,22 @@ class Settings(BaseSettings):
     importance_threshold: float = 0.33
     llm_batch_size: int = 8
     llm_model: str = "gemini-flash-latest"
+    # Optional distinct/stronger model for the offline eval JUDGE. Defaults to
+    # None → judge falls back to llm_model. Setting a DIFFERENT (ideally
+    # stronger) model here reduces self-grading bias: when the judge and the
+    # enricher share one model, the judge tends to ratify its own mistakes.
+    judge_model: str | None = None
+    # LLM-call resilience: per-attempt timeout, retry count, and backoff base.
+    llm_timeout: float = 60.0
+    llm_max_retries: int = 2
+    llm_backoff_base: float = 0.5
+    # Optional run-level wall-clock cap (seconds). None = no cap (default; the
+    # whole digest run can take as long as it needs). When set, the tree
+    # execution is wrapped in asyncio.wait_for so a stuck stage can't hang the
+    # run forever; on timeout the run finalizes FAILED and the error re-raises.
+    run_timeout: float | None = None
+    # Deterministic generation for structured-output agents.
+    llm_temperature: float = 0.0
     gnews_api_key: str = ""
     youtube_whisper_enabled: bool = False
     whisper_model: str = "base"
@@ -57,6 +73,13 @@ class Settings(BaseSettings):
     critic_min_importance: Importance = Importance.HIGH
     critic_check_watchlisted: bool = True
     critic_action: Literal["flag", "downrank", "replace"] = "downrank"
+    # Fail-closed: if the critic errors, protect (flag+redact) the items it was
+    # meant to check rather than shipping them unguarded ("open").
+    critic_fail_mode: Literal["open", "closed"] = "closed"
+    # Bounded self-correction: when the critic flags an item UNFAITHFUL, give the
+    # enricher up to this many chances to re-summarize with the critic's feedback
+    # before falling back to flag/redact. 0 disables reflection (legacy path).
+    critic_max_reflections: int = 1
     # API security. api_key=None leaves the API open (local/dev default).
     api_key: str | None = None
     # Token-bucket rate limit for POST /runs and POST /sources/resolve.

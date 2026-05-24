@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -11,7 +10,7 @@ from google.genai import types
 
 from app.core.config import Settings, SourceConfig
 from app.core.domain import RawItem, SourceType
-from app.llm.runtime import ensure_api_key
+from app.llm.runtime import _run_coro_sync, ensure_api_key
 
 if TYPE_CHECKING:
     from google.genai.types import GroundingMetadata
@@ -73,7 +72,10 @@ def adk_ground(source: SourceConfig, settings: Settings):
         return None
     ensure_api_key(settings)
     agent = build_search_agent(settings.llm_model)
-    return asyncio.run(_ground_async(agent, source.query))
+    # Loop-aware bridge: collectors run via asyncio.to_thread today, but use the
+    # shared sync->async bridge so a bare asyncio.run never executes inside a
+    # running event loop (same nested-loop hazard fixed in run_agent_text).
+    return _run_coro_sync(_ground_async(agent, source.query))
 
 
 def collect(source: SourceConfig, settings: Settings, *, ground: GroundFn = adk_ground) -> list[RawItem]:

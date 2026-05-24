@@ -28,13 +28,19 @@ from pydantic import ConfigDict
 from app.core.config import Settings, load_sources
 from app.core.domain import DigestRun, Importance, NewsItem, RunStatus, SourceType
 from app.core.ports.storage import StorageBackend
-from app.pipeline.critic import apply_verdicts, select_for_critique
+from app.pipeline.critic import (
+    apply_verdicts,
+    redact_unfaithful,
+    reflect_and_correct,
+    select_for_critique,
+)
 from app.pipeline.processing import process_items
 from app.runner import (
     _collect,
     _default_critic,
     _default_narrator,
     _default_processor,
+    _default_reprocessor,
     select_rendered,
 )
 from app.services import normalize as normalize_svc
@@ -44,6 +50,32 @@ from app.services.watchlist import load_watchlist
 
 if TYPE_CHECKING:
     from google.adk.agents.invocation_context import InvocationContext
+
+
+# ---------------------------------------------------------------------------
+# Source-of-truth: collected source types and their state keys
+# ---------------------------------------------------------------------------
+
+# Single source of truth for which SourceTypes are collected by the pipeline.
+# Both the per-type collector nodes and the NormalizeDedup merge iterate this,
+# so adding a SourceType here wires it through collection AND merging — no more
+# silently dropping a source by forgetting to update a second hardcoded list.
+COLLECTED_SOURCE_TYPES: tuple[SourceType, ...] = (
+    SourceType.RSS,
+    SourceType.SCRAPE,
+    SourceType.API,
+    SourceType.SEARCH,
+    SourceType.YOUTUBE,
+)
+
+
+def state_key_for(source_type: SourceType) -> str:
+    """State key holding the raw items collected for ``source_type``.
+
+    Returns the existing literals (``raws_rss`` … ``raws_youtube``) so storage
+    and tests are unaffected; the matching errors key is ``errors_<key>``.
+    """
+    return f"raws_{source_type.value}"
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +205,8 @@ class NormalizeDedupAgent(BaseAgent):
         run: DigestRun = state["run"]
 
         all_raws = []
-        for key in ("raws_rss", "raws_scrape", "raws_api", "raws_search", "raws_youtube"):
+        for source_type in COLLECTED_SOURCE_TYPES:
+            key = state_key_for(source_type)
             all_raws.extend(state.get(key) or [])
             # Merge per-source collector errors (safe: this stage is single-threaded).
             run.source_errors.extend(state.get(f"errors_{key}") or [])
@@ -208,13 +241,22 @@ class ProcessingAgent(BaseAgent):
         watchlist = state["watchlist"]
 
         try:
-            process_items(
+            batch_errors = process_items(
                 items,
                 self.processor,
                 watchlist,
                 self.settings.importance_threshold,
                 self.settings.llm_batch_size,
             )
+            for be in batch_errors:
+                run.source_errors.append(
+                    {
+                        "stage": "processing",
+                        "batch": be.get("batch"),
+                        "error": be.get("error"),
+                        "ts": _now(),
+                    }
+                )
         except Exception as exc:
             run.source_errors.append(
                 {"stage": "processing", "error": str(exc), "ts": _now()}
@@ -235,6 +277,7 @@ class GuardrailCriticAgent(BaseAgent):
     settings: Settings
     storage: StorageBackend
     critic: Callable
+    reprocessor: Callable
 
     async def _run_async_impl(
         self, ctx: InvocationContext
@@ -244,22 +287,41 @@ class GuardrailCriticAgent(BaseAgent):
         items: list[NewsItem] = state.get("items") or []
         watchlist = state["watchlist"]
 
+        selected = select_for_critique(items, watchlist, self.settings)
         try:
-            selected = select_for_critique(items, watchlist, self.settings)
             if selected:
-                verdicts = self.critic(selected)
-                outcome = apply_verdicts(
-                    selected,
-                    verdicts,
-                    self.settings.critic_action,
-                    self.settings.importance_threshold,
-                )
+                if self.settings.critic_max_reflections > 0:
+                    # Bounded self-correction: re-enrich critic-flagged items with
+                    # feedback before withholding (falls back to apply_verdicts).
+                    outcome = reflect_and_correct(
+                        selected,
+                        self.critic,
+                        self.reprocessor,
+                        watchlist,
+                        self.settings,
+                    )
+                else:
+                    # Reflection disabled → exactly the pre-batch path.
+                    verdicts = self.critic(selected)
+                    outcome = apply_verdicts(
+                        selected,
+                        verdicts,
+                        self.settings.critic_action,
+                        self.settings.importance_threshold,
+                    )
                 run.flagged = outcome["flagged"]
                 run.critic_verdicts = outcome["verdicts"]
         except Exception as exc:
             run.source_errors.append(
-                {"stage": "critic", "error": str(exc), "ts": _now()}
+                {"stage": "critic", "error": str(exc), "ts": _now(), "degraded": True}
             )
+            # Fail-closed: the critic could not verify the selected (HIGH /
+            # watchlisted) items, so protect them rather than ship unguarded.
+            if self.settings.critic_fail_mode == "closed":
+                for item in selected:
+                    item.status = "flagged"
+                    redact_unfaithful(item)
+                run.flagged = len(selected)
 
         yield _make_event(ctx, self.name)
 
@@ -347,6 +409,7 @@ def build_pipeline(
     processor: Callable | None = None,
     narrator: Callable | None = None,
     critic: Callable | None = None,
+    reprocessor: Callable | None = None,
 ) -> SequentialAgent:
     """Build and return the full NewsCatchUpPipeline SequentialAgent.
 
@@ -362,50 +425,23 @@ def build_pipeline(
     _processor = processor or _default_processor(settings)
     _narrator = narrator or _default_narrator(settings)
     _critic = critic or _default_critic(settings)
+    _reprocessor = reprocessor or _default_reprocessor(settings)
 
+    # Build one collector per collected SourceType from the shared
+    # source-of-truth, so the node keys and the NormalizeDedup merge keys can
+    # never drift apart. Names preserve the existing literals (CollectRss …).
     collect_sources = ParallelAgent(
         name="CollectSources",
         sub_agents=[
             SourceCollectorAgent(
-                name="CollectRss",
-                source_type=SourceType.RSS,
-                state_key="raws_rss",
+                name=f"Collect{source_type.value.capitalize()}",
+                source_type=source_type,
+                state_key=state_key_for(source_type),
                 settings=settings,
                 storage=storage,
                 collect_fn=_collect_fn,
-            ),
-            SourceCollectorAgent(
-                name="CollectScrape",
-                source_type=SourceType.SCRAPE,
-                state_key="raws_scrape",
-                settings=settings,
-                storage=storage,
-                collect_fn=_collect_fn,
-            ),
-            SourceCollectorAgent(
-                name="CollectApi",
-                source_type=SourceType.API,
-                state_key="raws_api",
-                settings=settings,
-                storage=storage,
-                collect_fn=_collect_fn,
-            ),
-            SourceCollectorAgent(
-                name="CollectSearch",
-                source_type=SourceType.SEARCH,
-                state_key="raws_search",
-                settings=settings,
-                storage=storage,
-                collect_fn=_collect_fn,
-            ),
-            SourceCollectorAgent(
-                name="CollectYoutube",
-                source_type=SourceType.YOUTUBE,
-                state_key="raws_youtube",
-                settings=settings,
-                storage=storage,
-                collect_fn=_collect_fn,
-            ),
+            )
+            for source_type in COLLECTED_SOURCE_TYPES
         ],
     )
 
@@ -434,6 +470,7 @@ def build_pipeline(
                 settings=settings,
                 storage=storage,
                 critic=_critic,
+                reprocessor=_reprocessor,
             ),
             DigestEditorAgent(
                 name="DigestEditor",

@@ -184,14 +184,17 @@ def test_run_eval_dimension_aggregation_matches_expectation():
             for item in items
         ])
 
-    # Verdict 1: faith=0.8, Verdict 2: faith=0.6 → mean = 0.7
+    # Verdict 1: faith=0.8 (failed), Verdict 2: faith=0.6 (passed) → mean = 0.7
+    # The first item FAILS faithfulness, so pass_rate = 0.5 and the
+    # safety-critical gate (perfect pass_rate required) must fail.
     scores = [0.8, 0.6]
+    faith_passed = [False, True]
 
     def fake_judge_fixed(pairs):
         return [
             EnrichmentVerdict(
                 item_id=item.id,
-                faithfulness=_dim(True, scores[i]),
+                faithfulness=_dim(faith_passed[i], scores[i]),
                 category_accuracy=_dim(True, 1.0),
                 importance_calibration=_dim(True, 1.0),
                 ar_translation_quality=_dim(True, 1.0),
@@ -202,7 +205,8 @@ def test_run_eval_dimension_aggregation_matches_expectation():
     report = run_eval(enrich=fake_enrich, judge=fake_judge_fixed, reference=reference)
     assert abs(report.dimension_mean_score["faithfulness"] - 0.7) < 1e-9
     assert report.dimension_mean_score["category_accuracy"] == 1.0
-    # faithfulness 0.7 < threshold 0.9 → should fail
+    # one failed faithfulness item → pass_rate 0.5 < 1.0 → should fail
+    assert report.dimension_pass_rate["faithfulness"] == 0.5
     assert "faithfulness" in report.failures
 
 
@@ -211,3 +215,134 @@ def test_load_reference_returns_list():
     data = load_reference(_REFERENCE_PATH)
     assert isinstance(data, list)
     assert len(data) > 0
+
+
+# ---------------------------------------------------------------------------
+# Calibration via the script (fake judge) — offline
+# ---------------------------------------------------------------------------
+
+def test_run_calibration_perfect_judge_matches_expectations():
+    """A judge that returns exactly the gold expectations → accuracy 1.0, no FP/FN."""
+    from scripts.eval_enrichment import load_reference, run_calibration
+
+    reference = load_reference(_REFERENCE_PATH)
+    expectations_by_id = {case["item"]["id"]: case["expectations"] for case in reference}
+
+    def fake_judge_gold(pairs):
+        return [
+            _verdict_from_expectations(item.id, expectations_by_id[item.id])
+            for item, _ in pairs
+        ]
+
+    calib = run_calibration(judge=fake_judge_gold, reference=reference)
+    assert calib["n_items"] == len(reference)
+    assert calib["overall"]["accuracy"] == 1.0
+    assert calib["overall"]["fp"] == 0
+    assert calib["overall"]["fn"] == 0
+
+
+def test_run_calibration_lenient_judge_has_false_positives():
+    """A judge that passes EVERYTHING flags FPs on the adversarial cases."""
+    from app.pipeline.eval_schema import EnrichmentVerdict
+    from scripts.eval_enrichment import load_reference, run_calibration
+
+    reference = load_reference(_REFERENCE_PATH)
+
+    def fake_judge_all_pass(pairs):
+        return [
+            EnrichmentVerdict(
+                item_id=item.id,
+                faithfulness=_dim(True, 1.0),
+                category_accuracy=_dim(True, 1.0),
+                importance_calibration=_dim(True, 1.0),
+                ar_translation_quality=_dim(True, 1.0),
+            )
+            for item, _ in pairs
+        ]
+
+    calib = run_calibration(judge=fake_judge_all_pass, reference=reference)
+    # Adversarial cases expect some dims to FAIL; an all-pass judge gets them wrong → FPs.
+    assert calib["overall"]["fp"] > 0
+    assert calib["per_dimension"]["faithfulness"]["fp"] > 0
+
+
+# ---------------------------------------------------------------------------
+# Baseline persistence + regression check — offline
+# ---------------------------------------------------------------------------
+
+def test_baseline_round_trip(tmp_path):
+    from app.pipeline.eval_score import EvalReport
+    from scripts.eval_enrichment import load_baseline, save_baseline
+
+    report = EvalReport(
+        n=4,
+        dimension_pass_rate={"faithfulness": 1.0, "category_accuracy": 0.9,
+                             "importance_calibration": 0.8, "ar_translation_quality": 0.85},
+        dimension_mean_score={"faithfulness": 0.95, "category_accuracy": 0.9,
+                              "importance_calibration": 0.8, "ar_translation_quality": 0.85},
+        dimension_min_score={"faithfulness": 0.9, "category_accuracy": 0.8,
+                             "importance_calibration": 0.7, "ar_translation_quality": 0.8},
+        passed=True,
+        failures=[],
+    )
+    path = tmp_path / "baseline.json"
+    save_baseline(report, path)
+    restored = load_baseline(path)
+    assert restored.dimension_mean_score == report.dimension_mean_score
+    assert restored.n == 4
+
+
+def test_check_regression_flags_drop():
+    from app.pipeline.eval_score import EvalReport
+    from scripts.eval_enrichment import check_regression
+
+    def _r(faith):
+        return EvalReport(
+            n=4,
+            dimension_pass_rate=dict.fromkeys(
+                ["faithfulness", "category_accuracy", "importance_calibration", "ar_translation_quality"], 1.0),
+            dimension_mean_score={"faithfulness": faith, "category_accuracy": 0.9,
+                                  "importance_calibration": 0.8, "ar_translation_quality": 0.85},
+            dimension_min_score={"faithfulness": faith, "category_accuracy": 0.9,
+                                 "importance_calibration": 0.8, "ar_translation_quality": 0.85},
+            passed=True,
+            failures=[],
+        )
+
+    baseline = _r(0.95)
+    current = _r(0.80)  # faithfulness dropped 0.15
+    result = check_regression(current, baseline)
+    assert result["regressed"] is True
+    assert "faithfulness" in result["regressions"]
+
+
+def test_check_regression_clean_when_stable():
+    from app.pipeline.eval_score import EvalReport
+    from scripts.eval_enrichment import check_regression
+
+    def _r():
+        return EvalReport(
+            n=4,
+            dimension_pass_rate=dict.fromkeys(
+                ["faithfulness", "category_accuracy", "importance_calibration", "ar_translation_quality"], 1.0),
+            dimension_mean_score={"faithfulness": 0.95, "category_accuracy": 0.9,
+                                  "importance_calibration": 0.8, "ar_translation_quality": 0.85},
+            dimension_min_score={"faithfulness": 0.95, "category_accuracy": 0.9,
+                                 "importance_calibration": 0.8, "ar_translation_quality": 0.85},
+            passed=True,
+            failures=[],
+        )
+
+    result = check_regression(_r(), _r())
+    assert result["regressed"] is False
+    assert result["regressions"] == []
+
+
+def test_committed_baseline_loads():
+    """The committed tests/eval/baseline.json must be schema-valid."""
+    from scripts.eval_enrichment import load_baseline
+    baseline = load_baseline()
+    assert baseline.n > 0
+    assert set(baseline.dimension_mean_score.keys()) == {
+        "faithfulness", "category_accuracy", "importance_calibration", "ar_translation_quality"
+    }

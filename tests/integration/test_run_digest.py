@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from app import runner
@@ -134,3 +136,53 @@ def test_run_digest_failed_run_finalized_on_unexpected_error(tmp_path, monkeypat
     assert saved_run.status == RunStatus.FAILED
     assert saved_run.finished_at is not None
     assert any("render boom" in e.get("error", "") for e in saved_run.source_errors)
+
+
+def test_run_digest_times_out_finalizes_failed(tmp_path, monkeypatch):
+    """With a tiny run_timeout and a deliberately slow tree, the run must
+    finalize FAILED and raise (TimeoutError) rather than hang forever."""
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "sources.yaml").write_text(
+        "sources:\n"
+        "  - id: techcrunch\n    type: rss\n    name: TechCrunch\n"
+        "    url: https://demo/feed\n    category_hint: ai_tech\n    enabled: true\n",
+        encoding="utf-8",
+    )
+    settings = Settings(
+        sqlite_path=str(tmp_path / "db.sqlite"),
+        config_dir=str(config_dir),
+        output_dir=str(tmp_path / "out"),
+        run_timeout=0.05,
+    )
+
+    storage = runner.build_storage(settings)
+
+    # Slow tree: create the run (so the FAILED path can find+finalize it),
+    # then sleep well past run_timeout so asyncio.wait_for fires.
+    async def slow_run_tree(tree, run_id):
+        from app.core.domain import DigestRun
+        storage.create_run(DigestRun(run_id=run_id))
+        await asyncio.sleep(5.0)
+
+    monkeypatch.setattr(runner, "_run_tree", slow_run_tree)
+
+    with pytest.raises(asyncio.TimeoutError):
+        runner.run_digest(
+            settings=settings,
+            storage=storage,
+            processor=lambda items: ProcessingResult(items=[]),
+            narrator=lambda items: "",
+            critic=lambda items: [],
+        )
+
+    runs = []
+    fresh = SqliteBackend(settings.sqlite_path)
+    fresh.init_schema()
+    with fresh._conn() as conn:
+        rows = conn.execute("SELECT data FROM digest_runs").fetchall()
+    from app.core.domain import DigestRun
+    runs = [DigestRun.model_validate_json(r["data"]) for r in rows]
+    assert len(runs) == 1
+    assert runs[0].status == RunStatus.FAILED
+    assert runs[0].finished_at is not None

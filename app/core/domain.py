@@ -4,7 +4,7 @@ import hashlib
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 DEFAULT_ORG = "default"
 DEFAULT_USER = "default"
@@ -26,6 +26,12 @@ class Category(StrEnum):
 
 
 class Importance(StrEnum):
+    # Importance bands (must stay aligned with app/prompts/processing.md and the
+    # importance_score field in app/llm/schema.py):
+    #   0.0-0.2 routine/incremental (minor product update, local notice)
+    #   0.3-0.5 notable sector news
+    #   0.6-0.8 major (large M&A, national policy, significant outage)
+    #   0.9-1.0 globally critical (war, major-economy crisis, landmark regulation)
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -35,6 +41,46 @@ class Sentiment(StrEnum):
     POSITIVE = "positive"
     NEUTRAL = "neutral"
     NEGATIVE = "negative"
+
+
+class EntityType(StrEnum):
+    """Allowed kinds of named entity extracted from an item.
+
+    Mirrored in app/prompts/processing.md so the model's output and this code
+    agree on the allowed values.
+    """
+
+    COMPANY = "company"
+    PERSON = "person"
+    ORG = "org"
+    PLACE = "place"
+    PRODUCT = "product"
+
+
+# Common LLM/stored synonyms mapped onto the canonical EntityType members. Used
+# by Entity's validator so a soft, forgiving mapping keeps previously stored
+# JSON (e.g. "organization") deserializable instead of a hard enum that would
+# reject it. Anything unrecognized falls back to ORG.
+_ENTITY_TYPE_SYNONYMS: dict[str, EntityType] = {
+    "organization": EntityType.ORG,
+    "organisation": EntityType.ORG,
+    "org": EntityType.ORG,
+    "company": EntityType.COMPANY,
+    "corporation": EntityType.COMPANY,
+    "corp": EntityType.COMPANY,
+    "business": EntityType.COMPANY,
+    "firm": EntityType.COMPANY,
+    "person": EntityType.PERSON,
+    "people": EntityType.PERSON,
+    "individual": EntityType.PERSON,
+    "place": EntityType.PLACE,
+    "location": EntityType.PLACE,
+    "country": EntityType.PLACE,
+    "city": EntityType.PLACE,
+    "region": EntityType.PLACE,
+    "product": EntityType.PRODUCT,
+    "service": EntityType.PRODUCT,
+}
 
 
 class RunStatus(StrEnum):
@@ -50,7 +96,23 @@ def make_item_id(url: str) -> str:
 
 class Entity(BaseModel):
     name: str
-    type: str = "org"
+    type: EntityType = EntityType.ORG
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def _coerce_type(cls, value: object) -> object:
+        """Lowercase + map common synonyms onto an EntityType member.
+
+        Soft governance: unknown/legacy strings (e.g. "organization") are mapped
+        rather than rejected, so previously stored JSON still deserializes. Truly
+        unrecognized values fall back to ORG.
+        """
+        if isinstance(value, EntityType):
+            return value
+        if isinstance(value, str):
+            key = value.strip().lower()
+            return _ENTITY_TYPE_SYNONYMS.get(key, EntityType.ORG)
+        return value
 
 
 class RawItem(BaseModel):
