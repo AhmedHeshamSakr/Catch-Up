@@ -8,7 +8,7 @@ from app.core.config import Settings, SourceConfig, load_sources
 from app.core.domain import DigestRun, Importance, RawItem, RunStatus, SourceType
 from app.core.ports.storage import StorageBackend
 from app.pipeline import digest_editor, processing
-from app.services import newsapi, normalize, rss, scrape
+from app.services import newsapi, normalize, rss, scrape, search
 from app.services.render import excel, markdown
 from app.services.render import html as html_render
 from app.services.watchlist import load_watchlist
@@ -27,7 +27,9 @@ def _collect(source: SourceConfig, settings: Settings) -> list[RawItem]:
         return newsapi.collect(source, settings.gnews_api_key)
     if source.type == SourceType.SCRAPE:
         return scrape.collect(source)
-    return []  # SEARCH grounding arrives in Plan 5
+    if source.type == SourceType.SEARCH:
+        return search.collect(source, settings)
+    return []
 
 
 def _default_processor(settings: Settings):

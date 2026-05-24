@@ -53,3 +53,9 @@ sources:
     selector: a.headline
     category_hint: business_finance
     enabled: false
+  - id: search-ai-breakthroughs
+    type: search
+    name: AI Breakthroughs (Search)
+    query: "most important AI and technology breakthroughs this week"
+    category_hint: ai_tech
+    enabled: false   # enable once Gemini quota is available — consumes model calls
