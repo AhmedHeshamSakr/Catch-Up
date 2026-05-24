@@ -26,7 +26,7 @@ export function NewsCard({ item }: NewsCardProps) {
           href={item.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="font-semibold text-foreground leading-snug hover:text-cyan transition-colors"
+          className="font-semibold text-link underline underline-offset-4 decoration-link/40 leading-snug transition-colors hover:decoration-link focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
         >
           {item.title}
         </a>
