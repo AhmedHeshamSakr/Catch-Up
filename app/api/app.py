@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import logging
 from collections.abc import Callable
 
@@ -43,7 +44,8 @@ def _require_api_key(settings: Settings):
         if not settings.api_key:
             return  # open when unset (local/dev)
         supplied = x_api_key or (authorization or "").removeprefix("Bearer ").strip()
-        if supplied != settings.api_key:
+        # Constant-time compare to avoid leaking the key via response timing.
+        if not hmac.compare_digest(supplied, settings.api_key):
             raise HTTPException(status_code=401, detail="invalid or missing API key")
 
     return dep
