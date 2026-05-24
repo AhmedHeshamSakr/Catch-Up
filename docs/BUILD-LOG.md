@@ -159,7 +159,18 @@ Executed subagent-driven on `feat/search-grounding`. Fully offline (model bounda
 - **Result:** `uv run pytest tests -q` → **72 passed**; `uv run --extra lint ruff check app tests` clean. Every commit authored solely by AhmedHeshamSakr.
 - **Deferred (needs Gemini quota):** live grounding spike — confirm which stream event carries `grounding_metadata`, redirect-URL resolvability, `web.domain` null on the Gemini API backend; then flip the search source `enabled: true`.
 
+### Phase: Plan 7 merged + social-monitoring discussion
+- **PR #7 merged → `main`.** Discussed agent architecture with Ahmed: current product agents are `news_processor`/`digest_editor`/`search_collector` (3 specialists) + a dead scaffold `root_agent`; orchestration is plain-Python `run_digest`, not yet an ADK tree (Plan 8). Agreed the core 3 are right; the valuable additions are a **quality safety net** (offline eval/judge + a *selective* faithfulness guardrail) and semantic dedup — designed but **parked** (see `~/.claude/plans/frolicking-sauteeing-forest.md`).
+- **New must-have feature raised:** monitor followed **social/video accounts** (LinkedIn, X, YouTube). Scoped by feasibility — **YouTube only for v1** (clean & free); X (paid/bridge) and LinkedIn (no clean API; ToS/legal risk) deferred behind the same pluggable collector port. Transcript approach: caption lib + Whisper fallback (Ahmed's ASR expertise).
+
+### Phase: Execution — YouTube channel monitoring ✅
+Executed subagent-driven on `feat/youtube-source` (off merged `main`). Fully offline (every external call injected); summary/Whisper live paths defer to quota/infra.
+- **Y1 — Backend collector** (`1f9e1cb`): `SourceType.YOUTUBE`; `SourceConfig.channel_id` + `Settings.youtube_whisper_enabled`/`whisper_model`; `app/services/youtube.py` — `fetch_channel_feed` (free channel RSS `feeds/videos.xml?channel_id=`), `parse_channel_feed` (feedparser `yt_videoid`/`media_description`, UTC via `calendar.timegm`), `get_transcript` (youtube-transcript-api v1.2.4 → lazy Whisper fallback → None), `build_youtube_summary_agent`/`adk_summarize` (via `adk_runtime`), `collect(..., storage=, fetch=, transcript=, summarize=)` that **dedups against storage BEFORE transcribing/summarizing** (no wasted cost on seen videos); `app/services/youtube_resolve.py` (`@handle`/URL→`UC…`, SSRF-guarded); `app/prompts/youtube_summary.md` (anti-injection); wired `SourceType.YOUTUBE` into `runner._collect` (threaded `storage`); disabled MKBHD example in `sources.yaml`; deps `youtube-transcript-api` (core) + `whisper` optional extra (`yt-dlp`/`faster-whisper`, lazy-imported). 21 offline tests. Review fixes: SSRF guard on resolver, real-error log level, dead-code removal.
+- **Y2 — Console support** (`977c53b`): frontend `youtube` SourceType + `channel_id` field + label; `fieldsForType`/`REQUIRED_BY_TYPE`/`validateSource` extended; type-aware Channel ID input in the Sources form; table target fallback. 42 frontend tests.
+- **Result:** backend `uv run pytest tests -q` → **93 passed**, ruff clean; frontend `npm test` → **42 passed**, tsc/lint/build clean. Every commit authored solely by AhmedHeshamSakr.
+- **Deferred (needs Gemini quota / opt-in infra):** live `adk_summarize` transcript→summary; the Whisper fallback (`whisper` extra, for Arabic/no-caption); live end-to-end against a real channel.
+
 ### Next
-- **PR #7** (`feat/search-grounding` → `main`) — open for review/merge.
-- Then **Plan 8 — orchestration** (full ADK `SequentialAgent` tree wiring `root_agent`) · **Plan 9 — GCP prod** (Firestore / Cloud Run / Cloud Scheduler / Vertex / observability / auth).
-- Deferred earlier: console screens needing new API endpoints (Categories, Pipeline, Runs & Schedule, Settings); the Plan 7 live grounding spike.
+- **PR #8** (`feat/youtube-source` → `main`) — open for review/merge.
+- **Parked, ready to build:** eval/judge loop + selective faithfulness guardrail (designed); then **Plan 8 — orchestration** (ADK `SequentialAgent` tree) · **Plan 9 — GCP prod**.
+- **Deferred access:** X (paid API / RSS bridge) + LinkedIn (compliant provider) monitoring; console screens needing new endpoints (Categories, Pipeline, Schedule, Settings); the Plan 7 live grounding spike.
