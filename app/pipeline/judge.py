@@ -56,7 +56,13 @@ def _judge_payload(pairs: list[tuple[NewsItem, ItemEnrichment]]) -> str:
 
 
 def adk_judge(pairs: list[tuple[NewsItem, ItemEnrichment]], settings: Settings) -> list[EnrichmentVerdict]:
-    """Real LLM call. Requires GOOGLE_API_KEY."""
-    agent = build_judge_agent(settings.llm_model, settings.llm_temperature)
+    """Real LLM call. Requires GOOGLE_API_KEY.
+
+    Uses ``settings.judge_model`` when set, otherwise falls back to
+    ``settings.llm_model``. Pointing the judge at a DISTINCT (ideally stronger)
+    model than the enricher reduces self-grading bias.
+    """
+    model = settings.judge_model or settings.llm_model
+    agent = build_judge_agent(model, settings.llm_temperature)
     text = run_agent_text(agent, _judge_payload(pairs), settings)
     return parse_model_json(text, EnrichmentVerdicts).verdicts

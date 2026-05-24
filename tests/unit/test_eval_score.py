@@ -2,7 +2,13 @@
 from __future__ import annotations
 
 from app.pipeline.eval_schema import DimensionVerdict, EnrichmentVerdict
-from app.pipeline.eval_score import THRESHOLDS, EvalReport, aggregate, compare
+from app.pipeline.eval_score import (
+    THRESHOLDS,
+    EvalReport,
+    aggregate,
+    calibrate_judge,
+    compare,
+)
 
 
 def _dim(passed: bool, score: float) -> DimensionVerdict:
@@ -58,27 +64,47 @@ def test_aggregate_exact_pass_rate():
     assert abs(report.dimension_mean_score["faithfulness"] - 0.6) < 1e-9
 
 
-def test_aggregate_threshold_boundary_fails_just_below():
-    """faithfulness threshold is 0.9; a mean_score of 0.8999 should fail."""
-    # Two verdicts with mean faith score = 0.8999
+def test_aggregate_faithfulness_gates_on_pass_rate_not_mean():
+    """Safety-critical: faithfulness is gated on pass_rate, NOT mean_score.
+
+    Both items have low faith scores but are marked passed, so the mean (0.8999)
+    is below the 0.9 threshold yet pass_rate is 1.0 — the gate must pass because
+    no item actually failed faithfulness.
+    """
     verdicts = [
-        _verdict("x", faith_score=0.8998),
-        _verdict("y", faith_score=0.9000),
+        _verdict("x", faith_passed=True, faith_score=0.8998),
+        _verdict("y", faith_passed=True, faith_score=0.9000),
     ]
     report = aggregate(verdicts)
     assert abs(report.dimension_mean_score["faithfulness"] - 0.8999) < 1e-9
+    assert report.dimension_pass_rate["faithfulness"] == 1.0
+    assert "faithfulness" not in report.failures
+
+
+def test_aggregate_single_faithfulness_failure_fails_gate_despite_high_mean():
+    """A SINGLE hallucination (faithfulness=0.0, passed=False) must fail the gate
+    even when the mean is high — a mean-based gate would have averaged it away."""
+    # 19 perfect + 1 hallucinated → mean = 0.95 (above 0.9 threshold)
+    verdicts = [_verdict(f"good-{i}", faith_passed=True, faith_score=1.0) for i in range(19)]
+    verdicts.append(_verdict("hallucination", faith_passed=False, faith_score=0.0))
+    report = aggregate(verdicts)
+    assert report.dimension_mean_score["faithfulness"] == 0.95  # high mean
+    assert report.dimension_min_score["faithfulness"] == 0.0    # but a 0.0 floor
+    assert report.dimension_pass_rate["faithfulness"] == 0.95   # 19/20 passed
+    # Safety-critical dims require a PERFECT pass_rate (1.0); one failed item
+    # (the hallucination) drops it to 0.95 and fails the gate.
     assert "faithfulness" in report.failures
     assert report.passed is False
 
 
 def test_aggregate_threshold_boundary_passes_at_threshold():
-    """A mean_score exactly at the threshold should pass."""
+    """All items pass faithfulness → pass_rate 1.0 → gate passes."""
     verdicts = [
         _verdict("x", faith_score=0.9),
         _verdict("y", faith_score=0.9),
     ]
     report = aggregate(verdicts)
-    assert abs(report.dimension_mean_score["faithfulness"] - 0.9) < 1e-9
+    assert report.dimension_pass_rate["faithfulness"] == 1.0
     assert "faithfulness" not in report.failures
 
 
@@ -130,6 +156,7 @@ def _report(faith: float = 1.0, cat: float = 1.0, imp: float = 1.0, ar: float = 
         n=4,
         dimension_pass_rate=pass_rates,
         dimension_mean_score=scores,
+        dimension_min_score=dict(scores),
         passed=len(failures) == 0,
         failures=failures,
     )
@@ -176,3 +203,130 @@ def test_compare_multiple_regressions():
     assert "category_accuracy" in result["regressions"]
     assert "importance_calibration" not in result["regressions"]
     assert "ar_translation_quality" not in result["regressions"]
+
+
+# ---------------------------------------------------------------------------
+# calibrate_judge: does the judge agree with gold expectations?
+# ---------------------------------------------------------------------------
+
+def _all_dims_verdict(item_id: str, passed_by_dim: dict[str, bool]) -> EnrichmentVerdict:
+    return EnrichmentVerdict(
+        item_id=item_id,
+        faithfulness=_dim(passed_by_dim["faithfulness"], 1.0 if passed_by_dim["faithfulness"] else 0.0),
+        category_accuracy=_dim(passed_by_dim["category_accuracy"], 1.0 if passed_by_dim["category_accuracy"] else 0.0),
+        importance_calibration=_dim(passed_by_dim["importance_calibration"], 1.0 if passed_by_dim["importance_calibration"] else 0.0),
+        ar_translation_quality=_dim(passed_by_dim["ar_translation_quality"], 1.0 if passed_by_dim["ar_translation_quality"] else 0.0),
+    )
+
+
+def test_calibrate_judge_perfect_agreement():
+    """Judge matches gold on every dim → accuracy 1.0, only TP/TN cells."""
+    expectations = {
+        "a": {"faithfulness": True, "category_accuracy": True,
+              "importance_calibration": True, "ar_translation_quality": True},
+        "b": {"faithfulness": False, "category_accuracy": False,
+              "importance_calibration": False, "ar_translation_quality": False},
+    }
+    verdicts = [
+        _all_dims_verdict("a", expectations["a"]),
+        _all_dims_verdict("b", expectations["b"]),
+    ]
+    result = calibrate_judge(verdicts, expectations)
+    assert result["n_items"] == 2
+    assert result["overall"]["accuracy"] == 1.0
+    assert result["overall"]["fp"] == 0
+    assert result["overall"]["fn"] == 0
+    for dim in THRESHOLDS:
+        cell = result["per_dimension"][dim]
+        assert cell["accuracy"] == 1.0
+        assert cell["tp"] == 1  # case "a"
+        assert cell["tn"] == 1  # case "b"
+
+
+def test_calibrate_judge_false_positive_lenient_judge():
+    """Gold expects faithfulness FAIL (injection) but judge passed it → FP.
+
+    This is the dangerous case: a lenient judge rubber-stamps a bad enrichment.
+    """
+    expectations = {
+        "inj": {"faithfulness": False, "category_accuracy": True,
+                "importance_calibration": True, "ar_translation_quality": True},
+    }
+    # Judge wrongly PASSES faithfulness
+    verdicts = [
+        _all_dims_verdict("inj", {"faithfulness": True, "category_accuracy": True,
+                                  "importance_calibration": True, "ar_translation_quality": True}),
+    ]
+    result = calibrate_judge(verdicts, expectations)
+    faith = result["per_dimension"]["faithfulness"]
+    assert faith["fp"] == 1
+    assert faith["tp"] == 0
+    assert faith["accuracy"] == 0.0
+    # other dims agreed (both expected and judged pass) → TP
+    assert result["per_dimension"]["category_accuracy"]["tp"] == 1
+
+
+def test_calibrate_judge_false_negative_strict_judge():
+    """Gold expects PASS but judge failed it → FN (judge too strict)."""
+    expectations = {
+        "ok": {"faithfulness": True, "category_accuracy": True,
+               "importance_calibration": True, "ar_translation_quality": True},
+    }
+    verdicts = [
+        _all_dims_verdict("ok", {"faithfulness": False, "category_accuracy": True,
+                                 "importance_calibration": True, "ar_translation_quality": True}),
+    ]
+    result = calibrate_judge(verdicts, expectations)
+    faith = result["per_dimension"]["faithfulness"]
+    assert faith["fn"] == 1
+    assert faith["tp"] == 0
+    assert faith["accuracy"] == 0.0
+
+
+def test_calibrate_judge_mixed_accuracy():
+    """3 items, faithfulness: 2 correct + 1 FP → accuracy 2/3."""
+    expectations = {
+        "a": {"faithfulness": True, "category_accuracy": True,
+              "importance_calibration": True, "ar_translation_quality": True},
+        "b": {"faithfulness": False, "category_accuracy": True,
+              "importance_calibration": True, "ar_translation_quality": True},
+        "c": {"faithfulness": False, "category_accuracy": True,
+              "importance_calibration": True, "ar_translation_quality": True},
+    }
+    verdicts = [
+        _all_dims_verdict("a", {"faithfulness": True, "category_accuracy": True,
+                                "importance_calibration": True, "ar_translation_quality": True}),  # TP
+        _all_dims_verdict("b", {"faithfulness": False, "category_accuracy": True,
+                                "importance_calibration": True, "ar_translation_quality": True}),  # TN
+        _all_dims_verdict("c", {"faithfulness": True, "category_accuracy": True,
+                                "importance_calibration": True, "ar_translation_quality": True}),  # FP
+    ]
+    result = calibrate_judge(verdicts, expectations)
+    faith = result["per_dimension"]["faithfulness"]
+    assert faith["tp"] == 1
+    assert faith["tn"] == 1
+    assert faith["fp"] == 1
+    assert faith["fn"] == 0
+    assert abs(faith["accuracy"] - (2 / 3)) < 1e-6
+
+
+def test_calibrate_judge_ignores_unknown_item():
+    """A verdict whose item_id is not in expectations is skipped."""
+    expectations = {
+        "known": {"faithfulness": True, "category_accuracy": True,
+                  "importance_calibration": True, "ar_translation_quality": True},
+    }
+    verdicts = [
+        _all_dims_verdict("known", expectations["known"]),
+        _all_dims_verdict("ghost", {"faithfulness": True, "category_accuracy": True,
+                                    "importance_calibration": True, "ar_translation_quality": True}),
+    ]
+    result = calibrate_judge(verdicts, expectations)
+    assert result["n_items"] == 1
+
+
+def test_calibrate_judge_empty():
+    result = calibrate_judge([], {})
+    assert result["n_items"] == 0
+    assert result["overall"]["accuracy"] == 0.0
+    assert result["overall"]["n"] == 0

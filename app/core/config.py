@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     importance_threshold: float = 0.33
     llm_batch_size: int = 8
     llm_model: str = "gemini-flash-latest"
+    # Optional distinct/stronger model for the offline eval JUDGE. Defaults to
+    # None → judge falls back to llm_model. Setting a DIFFERENT (ideally
+    # stronger) model here reduces self-grading bias: when the judge and the
+    # enricher share one model, the judge tends to ratify its own mistakes.
+    judge_model: str | None = None
     # LLM-call resilience: per-attempt timeout, retry count, and backoff base.
     llm_timeout: float = 60.0
     llm_max_retries: int = 2

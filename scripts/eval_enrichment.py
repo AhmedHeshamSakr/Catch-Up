@@ -8,6 +8,17 @@ Usage (live, needs GOOGLE_API_KEY):
 
 The offline mode does nothing useful on its own (enrich/judge must be injected).
 Use the --live flag to run with real ADK agents; report is written to output/eval/report.json.
+
+Live add-ons (all require GOOGLE_API_KEY):
+    --calibrate         Run the JUDGE over the reference enrichments with KNOWN
+                        gold expectations and print a per-dimension confusion
+                        matrix + accuracy — surfaces whether the JUDGE is
+                        trustworthy, not just whether the enricher passed.
+    --check-regression  After the eval, compare against the committed baseline
+                        (tests/eval/baseline.json) and EXIT NON-ZERO if any
+                        dimension regressed beyond the threshold.
+    --update-baseline   Overwrite tests/eval/baseline.json with the current
+                        report (refresh the regression baseline).
 """
 from __future__ import annotations
 
@@ -18,11 +29,12 @@ from pathlib import Path
 from app.core.domain import Category, NewsItem, Sentiment, SourceType
 from app.llm.schema import ItemEnrichment, ProcessingResult
 from app.pipeline.eval_schema import EnrichmentVerdict
-from app.pipeline.eval_score import EvalReport, aggregate
+from app.pipeline.eval_score import EvalReport, aggregate, calibrate_judge, compare
 from app.pipeline.judge import JudgeFn
 from app.pipeline.processing import EnrichFn
 
 _REFERENCE_PATH = Path(__file__).resolve().parents[1] / "tests" / "eval" / "fixtures" / "enrichment_reference.json"
+_BASELINE_PATH = Path(__file__).resolve().parents[1] / "tests" / "eval" / "baseline.json"
 
 
 def load_reference(path: str | Path = _REFERENCE_PATH) -> list[dict]:
@@ -92,6 +104,67 @@ def run_eval(
     return aggregate(verdicts)
 
 
+def run_calibration(*, judge: JudgeFn, reference: list[dict]) -> dict:
+    """Calibrate the JUDGE against gold expectations.
+
+    Feeds each case's reference enrichment (``reference_enrichment`` if present,
+    else the ``gold`` enrichment — which the adversarial cases deliberately make
+    known-BAD to match their ``expectations``) to the judge, then checks whether
+    the judge's per-dimension pass/fail matches the gold ``expectations``.
+
+    Returns the dict from :func:`app.pipeline.eval_score.calibrate_judge`.
+    """
+    news_items: list[NewsItem] = [_build_news_item(case["item"]) for case in reference]
+    items_by_id = {item.id: item for item in news_items}
+
+    pairs: list[tuple[NewsItem, ItemEnrichment]] = []
+    expectations: dict[str, dict[str, bool]] = {}
+    for case in reference:
+        item = items_by_id[case["item"]["id"]]
+        # reference_enrichment is optional; gold already encodes the known-good /
+        # known-bad input that the judge must score, so fall back to it.
+        ref_dict = case.get("reference_enrichment", case["gold"])
+        pairs.append((item, _build_item_enrichment(ref_dict)))
+        expectations[case["item"]["id"]] = case["expectations"]
+
+    verdicts = judge(pairs)
+    return calibrate_judge(verdicts, expectations)
+
+
+def load_baseline(path: str | Path = _BASELINE_PATH) -> EvalReport:
+    """Load the committed baseline EvalReport from disk."""
+    return EvalReport.model_validate_json(Path(path).read_text(encoding="utf-8"))
+
+
+def save_baseline(report: EvalReport, path: str | Path = _BASELINE_PATH) -> None:
+    """Persist an EvalReport as the regression baseline."""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(report.model_dump_json(indent=2), encoding="utf-8")
+
+
+def check_regression(current: EvalReport, baseline: EvalReport) -> dict:
+    """Compare the current report against a baseline.
+
+    Returns ``{"deltas": ..., "regressions": [...], "regressed": bool}``.
+    """
+    result = compare(baseline, current)
+    result["regressed"] = bool(result["regressions"])
+    return result
+
+
+def _print_calibration(calib: dict) -> None:
+    print("\n=== JUDGE CALIBRATION (vs gold expectations) ===")
+    print(f"items: {calib['n_items']}  overall accuracy: {calib['overall']['accuracy']:.3f}")
+    print(f"overall TP/FP/FN/TN: {calib['overall']['tp']}/{calib['overall']['fp']}/"
+          f"{calib['overall']['fn']}/{calib['overall']['tn']}")
+    for dim, cell in calib["per_dimension"].items():
+        print(f"  {dim}: acc={cell['accuracy']:.3f}  "
+              f"TP={cell['tp']} FP={cell['fp']} FN={cell['fn']} TN={cell['tn']}")
+    if calib["overall"]["fp"] > 0:
+        print("  WARNING: judge has FALSE POSITIVES — it passed items the gold says should FAIL "
+              "(lenient/untrustworthy judge).")
+
+
 def _main() -> None:
     parser = argparse.ArgumentParser(description="Enrichment quality eval harness")
     parser.add_argument(
@@ -104,11 +177,29 @@ def _main() -> None:
         default=str(_REFERENCE_PATH),
         help="Path to enrichment_reference.json fixture.",
     )
+    parser.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="Also calibrate the JUDGE against gold expectations (confusion matrix + accuracy). Implies --live.",
+    )
+    parser.add_argument(
+        "--check-regression",
+        action="store_true",
+        help="Compare against tests/eval/baseline.json and exit non-zero on regression. Implies --live.",
+    )
+    parser.add_argument(
+        "--update-baseline",
+        action="store_true",
+        help="Overwrite tests/eval/baseline.json with the current report. Implies --live.",
+    )
     args = parser.parse_args()
 
-    if not args.live:
+    live = args.live or args.calibrate or args.check_regression or args.update_baseline
+
+    if not live:
         print("Offline mode: no live model calls. Use --live to run against the real enrichment pipeline.")
         print(f"Reference fixture: {args.reference}")
+        print("Add --calibrate / --check-regression / --update-baseline (all imply --live).")
         return
 
     # Live mode — import real implementations
@@ -120,7 +211,7 @@ def _main() -> None:
 
     settings = Settings()
     if not settings.google_api_key and not os.environ.get("GOOGLE_API_KEY"):
-        raise SystemExit("ERROR: GOOGLE_API_KEY is required for --live mode.")
+        raise SystemExit("ERROR: GOOGLE_API_KEY is required for live mode.")
     reference = load_reference(args.reference)
 
     def enrich_fn(items):
@@ -140,7 +231,36 @@ def _main() -> None:
     print(f"Overall passed: {report.passed}")
     print(f"n={report.n}, failures={report.failures}")
     for dim, score in report.dimension_mean_score.items():
-        print(f"  {dim}: mean_score={score:.3f}  pass_rate={report.dimension_pass_rate[dim]:.3f}")
+        print(f"  {dim}: mean_score={score:.3f}  "
+              f"pass_rate={report.dimension_pass_rate[dim]:.3f}  "
+              f"min_score={report.dimension_min_score[dim]:.3f}")
+
+    # --calibrate: is the JUDGE itself trustworthy?
+    if args.calibrate:
+        calib = run_calibration(judge=judge_fn, reference=reference)
+        _print_calibration(calib)
+        (out_dir / "calibration.json").write_text(
+            json.dumps(calib, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    # --update-baseline: refresh the committed baseline
+    if args.update_baseline:
+        save_baseline(report)
+        print(f"\nBaseline updated: {_BASELINE_PATH}")
+
+    # --check-regression: fail the run if any dim regressed beyond threshold
+    if args.check_regression:
+        if not _BASELINE_PATH.exists():
+            raise SystemExit(f"ERROR: no baseline at {_BASELINE_PATH}. Run --update-baseline first.")
+        baseline = load_baseline()
+        result = check_regression(report, baseline)
+        print("\n=== REGRESSION CHECK vs baseline ===")
+        for dim, delta in result["deltas"].items():
+            marker = "  <-- REGRESSION" if dim in result["regressions"] else ""
+            print(f"  {dim}: delta={delta:+.3f}{marker}")
+        if result["regressed"]:
+            raise SystemExit(f"REGRESSION DETECTED in: {result['regressions']}")
+        print("No regression.")
 
 
 if __name__ == "__main__":

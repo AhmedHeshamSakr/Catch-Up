@@ -21,10 +21,58 @@ def _load() -> list[dict]:
     return json.loads(_FIXTURE_PATH.read_text(encoding="utf-8"))
 
 
+_CATEGORIES = ["ai_tech", "business_finance", "world_geopolitics", "gulf_mena"]
+
+
 def test_fixture_file_parses():
     data = _load()
     assert isinstance(data, list)
-    assert len(data) >= 8, "Expected at least 8 reference cases (5 happy-path + adversarial)"
+    assert len(data) >= 30, "Expected at least 30 reference cases (grown from the original 10)"
+
+
+def test_all_four_categories_represented_and_balanced():
+    """Every category must appear, and none should dominate (balance check)."""
+    data = _load()
+    from collections import Counter
+    counts = Counter(case["gold"]["category"] for case in data)
+    for cat in _CATEGORIES:
+        assert counts.get(cat, 0) >= 4, f"category '{cat}' under-represented: {counts.get(cat, 0)}"
+
+
+def test_multiple_ar_translation_negatives():
+    """Need several distinct Arabic-quality failure modes (bad MSA, dropped/added claim, dialect)."""
+    data = _load()
+    ar_negatives = [c for c in data if not c["expectations"]["ar_translation_quality"]]
+    assert len(ar_negatives) >= 3, "Need >=3 Arabic-quality negative cases"
+
+
+def test_multiple_faithfulness_negatives_including_injection():
+    """Several faithfulness failures (hallucination + multiple injection variants)."""
+    data = _load()
+    faith_negatives = [c for c in data if not c["expectations"]["faithfulness"]]
+    assert len(faith_negatives) >= 4, "Need >=4 faithfulness negative cases"
+    # At least two prompt-injection variants (heuristic: injection phrasing in title/excerpt)
+    inj_markers = ("ignore", "system override", "system:", "system prompt", "admin mode")
+    injections = [
+        c for c in faith_negatives
+        if any(m in (c["item"]["title"] + " " + c["item"]["excerpt"]).lower() for m in inj_markers)
+    ]
+    assert len(injections) >= 2, "Need >=2 prompt-injection variants among faithfulness negatives"
+
+
+def test_importance_miscalibration_both_directions():
+    """Need both over- and under-rated importance cases among the negatives."""
+    data = _load()
+    imp_negatives = [c for c in data if not c["expectations"]["importance_calibration"]]
+    overrated = [c for c in imp_negatives if c["gold"]["importance_score"] >= 0.8]
+    underrated = [c for c in imp_negatives if c["gold"]["importance_score"] <= 0.2]
+    assert overrated, "Need an over-rated importance negative (trivial item scored high)"
+    assert underrated, "Need an under-rated importance negative (major item scored low)"
+
+
+def test_empty_excerpt_case_present():
+    data = _load()
+    assert any(case["item"]["excerpt"] == "" for case in data), "Need at least one empty-excerpt edge case"
 
 
 def test_each_case_has_required_keys():

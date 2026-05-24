@@ -1,0 +1,23 @@
+{
+  "n": 35,
+  "dimension_pass_rate": {
+    "faithfulness": 1.0,
+    "category_accuracy": 0.94,
+    "importance_calibration": 0.91,
+    "ar_translation_quality": 0.97
+  },
+  "dimension_mean_score": {
+    "faithfulness": 0.96,
+    "category_accuracy": 0.92,
+    "importance_calibration": 0.84,
+    "ar_translation_quality": 0.9
+  },
+  "dimension_min_score": {
+    "faithfulness": 0.8,
+    "category_accuracy": 0.6,
+    "importance_calibration": 0.5,
+    "ar_translation_quality": 0.7
+  },
+  "passed": true,
+  "failures": []
+}
