@@ -10,7 +10,7 @@ from google.genai import types
 
 from app.core.config import Settings
 from app.core.domain import Importance, NewsItem
-from app.llm.parse import parse_model_json
+from app.llm.parse import parse_model_json, truncate_excerpt
 from app.llm.runtime import run_agent_text
 from app.pipeline.eval_schema import FaithfulnessVerdict, FaithfulnessVerdicts
 from app.pipeline.processing import ReprocessFn, _apply_enrichment, score_to_importance
@@ -53,7 +53,9 @@ def _critic_payload(items: list[NewsItem]) -> str:
         {
             "id": item.id,
             "title": item.title,
-            "excerpt": (item.excerpt or ""),
+            # Truncate to the SAME EXCERPT_CHARS limit the producer saw, so the
+            # critic grades faithfulness against the identical source text.
+            "excerpt": truncate_excerpt(item.excerpt),
             "summary_en": (item.summary_en or ""),
             "summary_ar": (item.summary_ar or ""),
         }

@@ -9,7 +9,7 @@ from google.genai import types
 
 from app.core.config import Settings
 from app.core.domain import NewsItem
-from app.llm.parse import parse_model_json
+from app.llm.parse import parse_model_json, truncate_excerpt
 from app.llm.runtime import run_agent_text
 from app.llm.schema import ItemEnrichment
 from app.pipeline.eval_schema import EnrichmentVerdict, EnrichmentVerdicts
@@ -42,7 +42,9 @@ def _judge_payload(pairs: list[tuple[NewsItem, ItemEnrichment]]) -> str:
         {
             "id": item.id,
             "title": item.title,
-            "excerpt": (item.excerpt or ""),
+            # Same EXCERPT_CHARS truncation as the producer/critic so the judge
+            # grades against the identical source text the enricher was given.
+            "excerpt": truncate_excerpt(item.excerpt),
             "enrichment": {
                 "category": enrichment.category,
                 "importance_score": enrichment.importance_score,

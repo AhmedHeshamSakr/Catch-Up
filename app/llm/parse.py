@@ -6,6 +6,20 @@ from pydantic import BaseModel
 
 BaseModelT = TypeVar("BaseModelT", bound=BaseModel)
 
+# Single source of truth for how much of an item's excerpt the LLM sees. The
+# producer (processing), the runtime critic, the reprocess step, and the eval
+# judge MUST all truncate identically so the guardrail/eval grade against the
+# exact source text the producer was given — never more, never less.
+EXCERPT_CHARS = 600
+
+
+def truncate_excerpt(text: str | None) -> str:
+    """Return ``text`` clipped to the shared ``EXCERPT_CHARS`` limit.
+
+    ``None`` is coerced to an empty string so payload builders stay uniform.
+    """
+    return (text or "")[:EXCERPT_CHARS]
+
 
 class LLMOutputError(ValueError):
     """Raised when an LLM's text output cannot be parsed into the target model."""

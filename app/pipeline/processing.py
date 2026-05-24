@@ -9,7 +9,7 @@ from google.genai import types
 
 from app.core.config import Settings
 from app.core.domain import Importance, NewsItem
-from app.llm.parse import parse_model_json
+from app.llm.parse import parse_model_json, truncate_excerpt
 from app.llm.runtime import run_agent_text
 from app.llm.schema import ItemEnrichment, ProcessingResult
 from app.pipeline.eval_schema import FaithfulnessVerdict
@@ -40,7 +40,10 @@ def _batches(items: list[NewsItem], size: int) -> list[list[NewsItem]]:
 
 def _items_json(items: list[NewsItem]) -> str:
     return json.dumps(
-        [{"id": it.id, "title": it.title, "excerpt": (it.excerpt or "")[:600]} for it in items],
+        [
+            {"id": it.id, "title": it.title, "excerpt": truncate_excerpt(it.excerpt)}
+            for it in items
+        ],
         ensure_ascii=False,
     )
 
@@ -80,7 +83,7 @@ def _reprocess_payload(
             {
                 "id": it.id,
                 "title": it.title,
-                "excerpt": (it.excerpt or "")[:600],
+                "excerpt": truncate_excerpt(it.excerpt),
                 "prior_summary_en": (it.summary_en or ""),
                 "critic_feedback": feedback,
             }
