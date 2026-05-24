@@ -39,6 +39,7 @@ def test_run_digest_end_to_end(tmp_path, monkeypatch):
         settings=settings,
         processor=lambda items: ProcessingResult(items=[]),
         narrator=lambda items: "",
+        critic=lambda items: [],
     )
 
     assert run.status == RunStatus.SUCCESS
@@ -77,6 +78,7 @@ def test_run_digest_isolates_source_failure(tmp_path, monkeypatch):
         settings=settings,
         processor=lambda items: ProcessingResult(items=[]),
         narrator=lambda items: "",
+        critic=lambda items: [],
     )
 
     assert run.status == RunStatus.PARTIAL
@@ -117,6 +119,7 @@ def test_run_digest_failed_run_finalized_on_unexpected_error(tmp_path, monkeypat
             settings=settings,
             processor=lambda items: ProcessingResult(items=[]),
             narrator=lambda items: "",
+            critic=lambda items: [],
         )
 
     # The run must exist in storage and be marked FAILED

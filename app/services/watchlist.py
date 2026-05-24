@@ -31,16 +31,20 @@ def load_watchlist(config_dir: str | Path) -> Watchlist:
     return Watchlist(entities=data.get("entities") or [], keywords=data.get("keywords") or [])
 
 
-def apply_boost(item: NewsItem, watchlist: Watchlist) -> None:
-    if item.importance_score is None:
-        return
+def watchlist_matched(item: NewsItem, watchlist: Watchlist) -> bool:
+    """Return True if the item matches any watchlist entity or keyword."""
     haystack = " ".join(
         [item.title.lower(), (item.summary_en or "").lower()]
         + [e.name.lower() for e in item.entities]
     )
     item_entity_names = {e.name.lower() for e in item.entities}
-    matched = bool(watchlist.entities_lower & item_entity_names) or any(
+    return bool(watchlist.entities_lower & item_entity_names) or any(
         kw in haystack for kw in (watchlist.entities_lower | watchlist.keywords_lower)
     )
-    if matched:
+
+
+def apply_boost(item: NewsItem, watchlist: Watchlist) -> None:
+    if item.importance_score is None:
+        return
+    if watchlist_matched(item, watchlist):
         item.importance_score = min(1.0, item.importance_score + BOOST)
