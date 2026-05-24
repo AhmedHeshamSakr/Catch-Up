@@ -8,11 +8,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import feedparser
-import httpx
 
 from app.core.config import Settings, SourceConfig
 from app.core.domain import RawItem, SourceType, make_item_id
 from app.llm.runtime import run_agent_text
+from app.services.net import safe_get
 
 log = logging.getLogger(__name__)
 
@@ -45,9 +45,12 @@ def channel_feed_url(channel_id: str) -> str:
     return f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
 
 
-def _default_fetch(channel_id: str) -> bytes:
+def _default_fetch(channel_id: str, *, resolver=None) -> bytes:
     url = channel_feed_url(channel_id)
-    resp = httpx.get(url, timeout=15.0, follow_redirects=True, headers=_HEADERS)
+    kwargs = {"timeout": 15.0, "headers": _HEADERS}
+    if resolver is not None:
+        kwargs["resolver"] = resolver
+    resp = safe_get(url, **kwargs)
     resp.raise_for_status()
     return resp.content
 
@@ -255,12 +258,10 @@ def collect(
     """
     from app.services.youtube_resolve import resolve_channel_id
 
-    # Resolve channel id
+    # Resolve channel id (uses resolve_channel_id's SSRF-guarded default fetch)
     channel_id = source.channel_id
     if not channel_id and source.url:
-        channel_id = resolve_channel_id(source.url, fetch=lambda url: httpx.get(
-            url, timeout=15.0, follow_redirects=True, headers=_HEADERS
-        ).content)
+        channel_id = resolve_channel_id(source.url)
     if not channel_id:
         log.warning("YouTube source %s: no channel_id and could not resolve from url", source.id)
         return []

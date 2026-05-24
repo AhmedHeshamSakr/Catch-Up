@@ -3,20 +3,18 @@ from __future__ import annotations
 from collections.abc import Callable
 from urllib.parse import urljoin
 
-import httpx
 from bs4 import BeautifulSoup
 
 from app.core.config import SourceConfig
 from app.core.domain import RawItem, SourceType
-from app.services.net import validate_public_url
+from app.services.net import safe_get
 
 FetchFn = Callable[[str], str]
 _HEADERS = {"User-Agent": "CatchUp/0.1 (+https://github.com/AhmedHeshamSakr/Catch-Up)"}
 
 
 def fetch_page(url: str, *, timeout: float = 10.0) -> str:
-    validate_public_url(url)
-    resp = httpx.get(url, timeout=timeout, follow_redirects=True, headers=_HEADERS)
+    resp = safe_get(url, timeout=timeout, headers=_HEADERS)
     resp.raise_for_status()
     return resp.text
 

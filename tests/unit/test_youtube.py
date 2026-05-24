@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from app.core.config import Settings, SourceConfig
 from app.core.domain import Category, SourceType
 from app.services import youtube as yt
@@ -245,3 +247,19 @@ def test_collect_returns_empty_when_no_channel():
     source = _source(channel_id=None, url=None)
     items = yt.collect(source, _SETTINGS, fetch=_fake_fetch, transcript=_fake_transcript, summarize=_fake_summarize)
     assert items == []
+
+
+# ---------------------------------------------------------------------------
+# SSRF guard — default channel feed fetch
+# ---------------------------------------------------------------------------
+
+def test_default_fetch_rejects_private_address():
+    """The DEFAULT channel-feed fetch must reject a host resolving to a private IP.
+
+    Injects a resolver that maps any host to a link-local metadata IP so no real
+    DNS/network call happens — the SSRF guard must raise before the HTTP request.
+    """
+    from app.services.net import UnsafeURLError
+
+    with pytest.raises(UnsafeURLError):
+        yt._default_fetch(_CHANNEL_ID, resolver=lambda host: ["169.254.169.254"])

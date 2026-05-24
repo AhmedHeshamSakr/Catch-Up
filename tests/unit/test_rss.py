@@ -1,3 +1,5 @@
+import pytest
+
 from app.core.config import SourceConfig
 from app.core.domain import Category, SourceType
 from app.services import rss
@@ -28,3 +30,15 @@ def test_parse_feed_extracts_valid_entries():
     assert first.source_name == "Demo"
     assert first.category_hint == Category.AI_TECH
     assert first.published_at is not None
+
+
+def test_fetch_feed_rejects_private_address():
+    """The DEFAULT fetch path must reject a private/loopback/link-local URL.
+
+    Uses an IP-literal host so socket.getaddrinfo resolves to the literal
+    without any real DNS/network call (stays offline).
+    """
+    from app.services.net import UnsafeURLError
+
+    with pytest.raises(UnsafeURLError):
+        rss.fetch_feed("http://169.254.169.254/latest/meta-data/")

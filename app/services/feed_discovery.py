@@ -3,10 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from urllib.parse import urljoin
 
-import httpx
 from bs4 import BeautifulSoup
 
-from app.services.net import validate_public_url
+from app.services.net import safe_get
 
 _HEADERS = {"User-Agent": "CatchUp/0.1 (+https://github.com/AhmedHeshamSakr/Catch-Up)"}
 
@@ -14,8 +13,7 @@ _FEED_TYPES = {"application/rss+xml", "application/atom+xml"}
 
 
 def _fetch(url: str) -> bytes:
-    validate_public_url(url)  # SSRF guard
-    resp = httpx.get(url, timeout=10.0, follow_redirects=True, headers=_HEADERS)
+    resp = safe_get(url, timeout=10.0, headers=_HEADERS)  # SSRF guard (per-hop)
     resp.raise_for_status()
     return resp.content
 

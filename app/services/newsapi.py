@@ -3,10 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime
 
-import httpx
-
 from app.core.config import SourceConfig
 from app.core.domain import RawItem, SourceType
+from app.services.net import safe_get
 
 GNEWS_SEARCH_URL = "https://gnews.io/api/v4/search"
 FetchFn = Callable[..., dict]
@@ -20,13 +19,17 @@ def fetch_gnews(
     country: str | None = None,
     max_articles: int = 10,
     timeout: float = 10.0,
+    resolver=None,
 ) -> dict:
     params = {"q": query, "apikey": api_key, "max": max_articles}
     if lang:
         params["lang"] = lang
     if country:
         params["country"] = country
-    resp = httpx.get(GNEWS_SEARCH_URL, params=params, timeout=timeout)
+    kwargs = {"params": params, "timeout": timeout}
+    if resolver is not None:
+        kwargs["resolver"] = resolver
+    resp = safe_get(GNEWS_SEARCH_URL, **kwargs)
     resp.raise_for_status()
     return resp.json()
 
