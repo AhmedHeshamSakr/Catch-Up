@@ -7,7 +7,7 @@ import type { Category, Importance } from "@/lib/types";
 import { CATEGORY_LABELS, IMPORTANCE_LABELS } from "@/lib/labels";
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState } from "@/components/common/empty-state";
-import { ErrorState } from "@/components/common/error-state";
+import { AsyncBoundary } from "@/components/common/async-boundary";
 import { NewsCard } from "@/components/digests/news-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
@@ -135,49 +135,40 @@ export default function NewsPage() {
         </CardContent>
       </Card>
 
-      {/* Loading */}
-      {isLoading && !data && (
-        <div className="flex flex-col gap-3">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <NewsCardSkeleton key={i} />
-          ))}
-        </div>
-      )}
-
-      {/* Error */}
-      {error && !data && (
-        <Card>
-          <CardContent className="py-0">
-            <ErrorState
-              title="Couldn't load news"
-              description="Is the API running on :8000?"
-              onRetry={() => mutate()}
-            />
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Empty */}
-      {data && data.length === 0 && (
-        <Card>
-          <CardContent className="py-0">
-            <EmptyState
-              icon={Newspaper}
-              title="No items match"
-              description="Try clearing filters or running a digest."
-            />
-          </CardContent>
-        </Card>
-      )}
-
-      {/* News list */}
-      {data && data.length > 0 && (
-        <div className="flex flex-col gap-3">
-          {data.map((item) => (
-            <NewsCard key={item.id} item={item} />
-          ))}
-        </div>
-      )}
+      <AsyncBoundary
+        isLoading={isLoading && !data}
+        error={error && !data ? error : undefined}
+        isEmpty={!!data && data.length === 0}
+        onRetry={() => mutate()}
+        errorTitle="Couldn't load news"
+        errorDescription="Is the API running on :8000?"
+        skeleton={
+          <div className="flex flex-col gap-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <NewsCardSkeleton key={i} />
+            ))}
+          </div>
+        }
+        empty={
+          <Card>
+            <CardContent className="py-0">
+              <EmptyState
+                icon={Newspaper}
+                title="No items match"
+                description="Try clearing filters or running a digest."
+              />
+            </CardContent>
+          </Card>
+        }
+      >
+        {data && data.length > 0 && (
+          <div className="flex flex-col gap-3">
+            {data.map((item) => (
+              <NewsCard key={item.id} item={item} />
+            ))}
+          </div>
+        )}
+      </AsyncBoundary>
     </div>
   );
 }
