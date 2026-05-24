@@ -5,9 +5,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from google.adk.agents import Agent
+from google.genai import types
 
 from app.core.config import Settings
 from app.core.domain import Importance, NewsItem
+from app.llm.parse import parse_model_json
 from app.llm.runtime import run_agent_text
 from app.llm.schema import ProcessingResult
 from app.services.watchlist import Watchlist, apply_boost
@@ -38,21 +40,22 @@ def _items_json(items: list[NewsItem]) -> str:
     )
 
 
-def build_processing_agent(model: str) -> Agent:
+def build_processing_agent(model: str, temperature: float = 0.0) -> Agent:
     return Agent(
         name="news_processor",
         model=model,
         instruction=_PROMPT,
         output_schema=ProcessingResult,
         output_key="processing_result",
+        generate_content_config=types.GenerateContentConfig(temperature=temperature),
     )
 
 
 def adk_enrich(items: list[NewsItem], settings: Settings) -> ProcessingResult:
     """Real LLM call. Validated by the live smoke (needs GOOGLE_API_KEY)."""
-    agent = build_processing_agent(settings.llm_model)
+    agent = build_processing_agent(settings.llm_model, settings.llm_temperature)
     text = run_agent_text(agent, _items_json(items), settings)
-    return ProcessingResult.model_validate_json(text)
+    return parse_model_json(text, ProcessingResult)
 
 
 def process_items(
@@ -61,12 +64,26 @@ def process_items(
     watchlist: Watchlist,
     threshold: float,
     batch_size: int,
-) -> None:
+    errors: list[dict] | None = None,
+) -> list[dict]:
+    """Enrich items batch by batch with per-batch isolation.
+
+    A batch that raises does not abort the stage: the error is recorded and the
+    failed batch's items fall through to ``status="raw"``. Returns the list of
+    per-batch error dicts (the same object as ``errors`` when one is passed in).
+    """
+    if errors is None:
+        errors = []
     if not items:
-        return
+        return errors
     enrichments = {}
-    for batch in _batches(items, batch_size):
-        for e in enrich(batch).items:
+    for i, batch in enumerate(_batches(items, batch_size)):
+        try:
+            result = enrich(batch)
+        except Exception as exc:  # isolate one batch's failure from the stage
+            errors.append({"batch": i, "error": str(exc)})
+            continue
+        for e in result.items:
             enrichments[e.id] = e
     for item in items:
         e = enrichments.get(item.id)
@@ -82,3 +99,4 @@ def process_items(
         apply_boost(item, watchlist)
         item.importance = score_to_importance(item.importance_score)
         item.status = "processed" if item.importance_score >= threshold else "filtered"
+    return errors

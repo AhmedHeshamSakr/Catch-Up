@@ -18,14 +18,18 @@ _CANNED = "canned model output"
 
 
 class _SettingsStub:
-    """Minimal stand-in: ensure_api_key only reads ``google_api_key``."""
+    """Minimal stand-in: ensure_api_key reads ``google_api_key``; the retry
+    bridge reads the resilience fields below."""
 
     google_api_key = None
+    llm_timeout = 60.0
+    llm_max_retries = 2
+    llm_backoff_base = 0.0
 
 
 @pytest.fixture
 def stub_model(monkeypatch):
-    async def _fake_run_text_async(agent, payload, *, app_name="catchup"):
+    async def _fake_run_text_async(agent, payload, *, app_name="catchup", timeout=None):
         return _CANNED
 
     monkeypatch.setattr(adk_runtime, "_run_text_async", _fake_run_text_async)

@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     importance_threshold: float = 0.33
     llm_batch_size: int = 8
     llm_model: str = "gemini-flash-latest"
+    # LLM-call resilience: per-attempt timeout, retry count, and backoff base.
+    llm_timeout: float = 60.0
+    llm_max_retries: int = 2
+    llm_backoff_base: float = 0.5
+    # Deterministic generation for structured-output agents.
+    llm_temperature: float = 0.0
     gnews_api_key: str = ""
     youtube_whisper_enabled: bool = False
     whisper_model: str = "base"

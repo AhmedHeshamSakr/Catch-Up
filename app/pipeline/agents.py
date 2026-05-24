@@ -208,13 +208,22 @@ class ProcessingAgent(BaseAgent):
         watchlist = state["watchlist"]
 
         try:
-            process_items(
+            batch_errors = process_items(
                 items,
                 self.processor,
                 watchlist,
                 self.settings.importance_threshold,
                 self.settings.llm_batch_size,
             )
+            for be in batch_errors:
+                run.source_errors.append(
+                    {
+                        "stage": "processing",
+                        "batch": be.get("batch"),
+                        "error": be.get("error"),
+                        "ts": _now(),
+                    }
+                )
         except Exception as exc:
             run.source_errors.append(
                 {"stage": "processing", "error": str(exc), "ts": _now()}

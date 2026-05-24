@@ -72,3 +72,43 @@ def test_process_items_marks_raw_when_enrichment_missing():
     items = [_news("https://a.com/1", "t")]
     processing.process_items(items, lambda b: ProcessingResult(items=[]), Watchlist(), 0.33, 8)
     assert items[0].status == "raw"
+
+
+def test_process_items_isolates_failed_batch():
+    # 3 items, batch_size=1 -> 3 batches. The 2nd batch's enrich raises.
+    items = [
+        _news("https://a.com/1", "first"),
+        _news("https://a.com/2", "second"),
+        _news("https://a.com/3", "third"),
+    ]
+    seen: list[str] = []
+
+    def flaky_enrich(batch):
+        title = batch[0].title
+        seen.append(title)
+        if title == "second":
+            raise RuntimeError("batch blew up")
+        return ProcessingResult(items=[
+            ItemEnrichment(
+                id=it.id, category=Category.AI_TECH, importance_score=0.8,
+                summary_en="en", summary_ar="ar", entities=[],
+                sentiment=Sentiment.NEUTRAL,
+            ) for it in batch
+        ])
+
+    errors: list[dict] = []
+    out = processing.process_items(
+        items, flaky_enrich, Watchlist(), threshold=0.33, batch_size=1, errors=errors
+    )
+
+    # All 3 batches were attempted (failure did not abort the stage).
+    assert seen == ["first", "second", "third"]
+    # Batches 1 and 3 enriched; batch 2's item fell through to raw.
+    assert items[0].status == "processed"
+    assert items[1].status == "raw"
+    assert items[2].status == "processed"
+    # The error was recorded (in the passed sink and in the return value).
+    assert len(errors) == 1
+    assert errors[0]["batch"] == 1
+    assert "batch blew up" in errors[0]["error"]
+    assert out == errors

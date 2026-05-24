@@ -6,9 +6,11 @@ from pathlib import Path
 from typing import Literal
 
 from google.adk.agents import Agent
+from google.genai import types
 
 from app.core.config import Settings
 from app.core.domain import Importance, NewsItem
+from app.llm.parse import parse_model_json
 from app.llm.runtime import run_agent_text
 from app.pipeline.eval_schema import FaithfulnessVerdict, FaithfulnessVerdicts
 from app.pipeline.processing import score_to_importance
@@ -35,13 +37,14 @@ _IMPORTANCE_ORDER: dict[Importance, int] = {
 }
 
 
-def build_critic_agent(model: str) -> Agent:
+def build_critic_agent(model: str, temperature: float = 0.0) -> Agent:
     return Agent(
         name="faithfulness_critic",
         model=model,
         instruction=_CRITIC_PROMPT,
         output_schema=FaithfulnessVerdicts,
         output_key="verdicts",
+        generate_content_config=types.GenerateContentConfig(temperature=temperature),
     )
 
 
@@ -61,9 +64,9 @@ def _critic_payload(items: list[NewsItem]) -> str:
 
 def adk_critique(items: list[NewsItem], settings: Settings) -> list[FaithfulnessVerdict]:
     """Real LLM call. Requires GOOGLE_API_KEY."""
-    agent = build_critic_agent(settings.llm_model)
+    agent = build_critic_agent(settings.llm_model, settings.llm_temperature)
     text = run_agent_text(agent, _critic_payload(items), settings)
-    return FaithfulnessVerdicts.model_validate_json(text).verdicts
+    return parse_model_json(text, FaithfulnessVerdicts).verdicts
 
 
 def select_for_critique(
