@@ -42,7 +42,7 @@ export GOOGLE_API_KEY=...   # or put it in .env (gitignored)
 uv run python -m app.cli run
 ```
 
-Sources live in `config/sources.yaml` — each has a `type`: **`rss`**, **`api`** (GNews; set `query`, optional `lang`/`country`), **`scrape`** (set a CSS `selector`), **`search`** (Google Search grounding via ADK `google_search`; set a `query`), or **`youtube`** (monitor a channel; set its `channel_id`, the `UC…` id). Search sources need `GOOGLE_API_KEY` and consume model calls, so they ship **disabled by default**; their results link via Google grounding-redirect URLs and carry no publish date. YouTube sources detect new uploads via the channel's free RSS feed (no key) and summarize each video's transcript (`youtube-transcript-api`, with an optional Whisper fallback behind the `whisper` extra; the transcript summary needs `GOOGLE_API_KEY`) — also disabled by default. The GNews collector needs `GNEWS_API_KEY` (`export GNEWS_API_KEY=...` or `.env`). Importance-boost entities/keywords live in `config/watchlist.yaml`.
+Sources live in `config/sources.yaml` — each has a `type`: **`rss`**, **`api`** (GNews; set `query`, optional `lang`/`country`), **`scrape`** (set a CSS `selector`), **`search`** (Google Search grounding via ADK `google_search`; set a `query`), or **`youtube`** (monitor a channel; set its `channel_id`, the `UC…` id). Search sources need `GOOGLE_API_KEY` and consume model calls, so they ship **disabled by default**; their results link via Google grounding-redirect URLs and carry no publish date. YouTube sources detect new uploads via the channel's free RSS feed (no key) and summarize each video's transcript (`youtube-transcript-api`, with an optional Whisper fallback behind the `whisper` extra; the transcript summary needs `GOOGLE_API_KEY`) — also disabled by default. The GNews collector needs `GNEWS_API_KEY` (`export GNEWS_API_KEY=...` or `.env`). Importance-boost entities/keywords live in `config/watchlist.yaml`. In the **console** you don't need the exact technical value — paste a YouTube **channel URL / @handle** or a newspaper **homepage URL** in the Sources form and click **Resolve** to auto-fill the `channel_id` / discovered RSS feed.
 Without keys, collection/dedup/storage still run and the digest degrades gracefully (items unenriched); scrape URLs are SSRF-guarded (public hosts only).
 
 ## Quality & faithfulness
@@ -76,6 +76,7 @@ uv run python -m app.cli serve --host 0.0.0.0 --port 8080
 | `GET /api/runs/{run_id}` | Run detail + its news items |
 | `GET /api/sources` | Configured news sources |
 | `PUT /api/sources` | Update sources config (YAML round-trip) |
+| `POST /api/sources/resolve` | Resolve a pasted link → `channel_id` (youtube) or RSS feed `url` (rss) |
 | `GET /api/watchlist` | Watchlist entities + keywords |
 | `PUT /api/watchlist` | Update watchlist |
 | `POST /api/runs` | Trigger a new digest run (async) |

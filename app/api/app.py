@@ -5,11 +5,11 @@ from collections.abc import Callable
 from fastapi import APIRouter, BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.schemas import DashboardOut, RunDetail
+from app.api.schemas import DashboardOut, ResolveIn, ResolveOut, RunDetail
 from app.core.config import Settings, SourceConfig, load_sources
 from app.core.domain import Category, Importance
 from app.runner import build_storage, run_digest
-from app.services import config_store
+from app.services import config_store, feed_discovery, youtube_resolve
 from app.services.watchlist import Watchlist, load_watchlist
 
 
@@ -17,6 +17,8 @@ def create_app(
     settings: Settings | None = None,
     *,
     run_digest_fn: Callable[..., object] = run_digest,
+    resolve_channel_id_fn: Callable[..., object] = youtube_resolve.resolve_channel_id,
+    discover_feed_fn: Callable[..., object] = feed_discovery.discover_feed,
 ) -> FastAPI:
     settings = settings or Settings()
     app = FastAPI(title="Catch-Up API", version="0.1.0")
@@ -90,6 +92,31 @@ def create_app(
     def trigger_run(background: BackgroundTasks):
         background.add_task(run_digest_fn, settings=settings)
         return {"status": "started"}
+
+    @api.post("/sources/resolve", response_model=ResolveOut)
+    def resolve_source(body: ResolveIn) -> ResolveOut:
+        if body.type == "youtube":
+            try:
+                cid = resolve_channel_id_fn(body.url)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            if not cid:
+                raise HTTPException(status_code=422, detail="Could not resolve a YouTube channel from that link")
+            return ResolveOut(channel_id=cid)
+        elif body.type == "rss":
+            try:
+                feed = discover_feed_fn(body.url)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            if not feed:
+                raise HTTPException(status_code=422, detail="No RSS feed found at that URL")
+            return ResolveOut(url=feed)
+        else:
+            raise HTTPException(status_code=400, detail="resolve is not supported for this source type")
 
     app.include_router(api)
     return app

@@ -48,3 +48,18 @@ it("throws ApiError on non-2xx", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status: 500 })));
   await expect(api.getDashboard()).rejects.toThrow();
 });
+
+it("resolveSource POSTs /api/sources/resolve with type+url and returns parsed json", async () => {
+  const payload = { channel_id: "UC_abc123", name: "Test Channel", url: null };
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 }));
+  vi.stubGlobal("fetch", fetchMock);
+  const result = await api.resolveSource("youtube", "https://youtube.com/@testchannel");
+  const [url, opts] = fetchMock.mock.calls[0];
+  expect(url).toBe("http://test/api/sources/resolve");
+  expect(opts.method).toBe("POST");
+  const body = JSON.parse(opts.body);
+  expect(body.type).toBe("youtube");
+  expect(body.url).toBe("https://youtube.com/@testchannel");
+  expect(result.channel_id).toBe("UC_abc123");
+  expect(result.name).toBe("Test Channel");
+});

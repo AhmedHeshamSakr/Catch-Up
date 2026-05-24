@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { toast } from "sonner";
+import { Wand2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -16,6 +17,7 @@ import { Switch } from "@/components/ui/switch";
 import type { SourceConfig, SourceType, Category } from "@/lib/types";
 import { CATEGORY_LABELS, SOURCE_TYPE_LABELS } from "@/lib/labels";
 import { fieldsForType, validateSource } from "@/lib/sources";
+import { api, ApiError } from "@/lib/api";
 
 interface SourceFormDialogProps {
   open: boolean;
@@ -93,6 +95,8 @@ function SourceFormBody({
   const [form, setForm] = useState<FormState>(initial);
   const [errors, setErrors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [linkInput, setLinkInput] = useState("");
+  const [resolving, setResolving] = useState(false);
 
   const set = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -105,6 +109,31 @@ function SourceFormBody({
   const handleTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setForm((prev) => ({ ...prev, type: e.target.value as SourceType }));
     setErrors([]);
+    setLinkInput("");
+  };
+
+  const handleResolve = async () => {
+    setResolving(true);
+    try {
+      const r = await api.resolveSource(form.type, linkInput.trim());
+      if (form.type === "youtube" && r.channel_id) {
+        set("channelId", r.channel_id);
+      }
+      if (form.type === "rss" && r.url) {
+        set("url", r.url);
+      }
+      if (r.name && form.name.trim() === "") {
+        set("name", r.name);
+      }
+      setLinkInput("");
+      toast.success("Resolved");
+    } catch (e) {
+      toast.error(
+        e instanceof ApiError ? e.message : "Could not resolve that link"
+      );
+    } finally {
+      setResolving(false);
+    }
   };
 
   const handleSave = async () => {
@@ -214,6 +243,42 @@ function SourceFormBody({
             ))}
           </select>
         </div>
+
+        {/* Paste-a-link resolve row — youtube and rss only */}
+        {(form.type === "youtube" || form.type === "rss") && (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="src-link-input">
+              {form.type === "youtube" ? "Channel URL or @handle" : "Site or feed URL"}
+            </Label>
+            <div className="flex gap-2">
+              <Input
+                id="src-link-input"
+                value={linkInput}
+                onChange={(e) => setLinkInput(e.target.value)}
+                placeholder={
+                  form.type === "youtube"
+                    ? "Channel URL or @handle"
+                    : "Site or feed URL"
+                }
+                className="flex-1"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="default"
+                disabled={!linkInput.trim() || resolving}
+                onClick={handleResolve}
+                aria-label="Resolve link"
+              >
+                <Wand2 className="size-4" />
+                {resolving ? "Resolving…" : "Resolve"}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Paste a link and Resolve, or enter the value directly below.
+            </p>
+          </div>
+        )}
 
         {/* Conditional fields */}
         {fields.includes("url") && (
