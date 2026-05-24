@@ -3,9 +3,19 @@
 Each wrapper is a thin BaseAgent subclass that reads state from
 ctx.session.state, calls the existing proven functions, and writes
 results back to state. No LLM calls — all orchestration logic only.
+
+State-propagation decision: the pipeline runs against a single in-process
+session (InMemoryRunner / InMemorySessionService), so agents mutate
+``ctx.session.state`` directly and emit a plain terminal Event with no
+``EventActions.state_delta``. This is intentional — the empty state_delta the
+runner would persist is dead plumbing here. When a persistent/distributed
+session service (Firestore / Vertex Agent Engine — Plan 9) is introduced,
+durable values that must survive across processes will need to move into
+``state_delta`` so the session service persists them.
 """
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -13,7 +23,6 @@ from typing import TYPE_CHECKING, Any
 from google.adk.agents import ParallelAgent, SequentialAgent
 from google.adk.agents.base_agent import BaseAgent
 from google.adk.events.event import Event
-from google.adk.events.event_actions import EventActions
 from pydantic import ConfigDict
 
 from app.core.config import Settings, load_sources
@@ -21,6 +30,13 @@ from app.core.domain import DigestRun, Importance, NewsItem, RunStatus, SourceTy
 from app.core.ports.storage import StorageBackend
 from app.pipeline.critic import apply_verdicts, select_for_critique
 from app.pipeline.processing import process_items
+from app.runner import (
+    _collect,
+    _default_critic,
+    _default_narrator,
+    _default_processor,
+    select_rendered,
+)
 from app.services import normalize as normalize_svc
 from app.services.render import excel, markdown
 from app.services.render import html as html_render
@@ -43,14 +59,17 @@ def _now_dt() -> datetime:
     return datetime.now(UTC)
 
 
-def _make_event(ctx: Any, author: str, state_delta: dict | None = None) -> Event:
-    """Build a minimal pipeline event, optionally carrying a state_delta."""
-    actions = EventActions(state_delta=state_delta or {})
+def _make_event(ctx: Any, author: str) -> Event:
+    """Build a minimal terminal pipeline event.
+
+    Agents mutate ``ctx.session.state`` directly (single in-process session),
+    so no ``EventActions.state_delta`` is attached — see the module docstring
+    for the durable-session migration note.
+    """
     return Event(
         invocation_id=ctx.invocation_id,
         author=author,
         branch=ctx.branch,
-        actions=actions,
     )
 
 
@@ -107,8 +126,8 @@ class SourceCollectorAgent(BaseAgent):
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
         state = ctx.session.state
-        run: DigestRun = state["run"]
         raws = []
+        errors: list[dict] = []
 
         for source in load_sources(self.settings.config_dir):
             if not source.enabled:
@@ -116,13 +135,21 @@ class SourceCollectorAgent(BaseAgent):
             if source.type != self.source_type:
                 continue
             try:
-                raws.extend(self.collect_fn(source, self.settings, self.storage))
+                # Run the blocking collector off the event loop so the
+                # ParallelAgent collectors are genuinely concurrent.
+                collected = await asyncio.to_thread(
+                    self.collect_fn, source, self.settings, self.storage
+                )
+                raws.extend(collected)
             except Exception as exc:
-                run.source_errors.append(
+                errors.append(
                     {"source_id": source.id, "error": str(exc), "ts": _now()}
                 )
 
+        # Each parallel collector writes ONLY its own keys; NormalizeDedup
+        # merges the per-source errors into run.source_errors single-threaded.
         state[self.state_key] = raws
+        state[f"errors_{self.state_key}"] = errors
 
         yield _make_event(ctx, self.name)
 
@@ -148,6 +175,8 @@ class NormalizeDedupAgent(BaseAgent):
         all_raws = []
         for key in ("raws_rss", "raws_scrape", "raws_api", "raws_search", "raws_youtube"):
             all_raws.extend(state.get(key) or [])
+            # Merge per-source collector errors (safe: this stage is single-threaded).
+            run.source_errors.extend(state.get(f"errors_{key}") or [])
 
         run.collected = len(all_raws)
         items = normalize_svc.normalize_and_dedup(all_raws, self.storage, run.run_id)
@@ -251,8 +280,6 @@ class DigestEditorAgent(BaseAgent):
     async def _run_async_impl(
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
-        from app.runner import select_rendered
-
         state = ctx.session.state
         run: DigestRun = state["run"]
         items: list[NewsItem] = state.get("items") or []
@@ -285,8 +312,6 @@ class RenderAgent(BaseAgent):
     async def _run_async_impl(
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
-        from app.runner import select_rendered
-
         state = ctx.session.state
         run: DigestRun = state["run"]
         items: list[NewsItem] = state.get("items") or []
@@ -333,14 +358,6 @@ def build_pipeline(
     The build_pipeline `run_id` param is accepted for forward compatibility
     but unused here — PipelineInitAgent reads it from ctx.session.state.
     """
-    # Deferred imports to avoid circular import at module load time
-    from app.runner import (
-        _collect,
-        _default_critic,
-        _default_narrator,
-        _default_processor,
-    )
-
     _collect_fn = collect_fn or _collect
     _processor = processor or _default_processor(settings)
     _narrator = narrator or _default_narrator(settings)

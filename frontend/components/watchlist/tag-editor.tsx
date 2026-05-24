@@ -75,7 +75,7 @@ export function TagEditor({
         <div className="flex flex-wrap gap-1.5">
           {values.map((value, i) => (
             <span
-              key={i}
+              key={value}
               className={cn(
                 "inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5",
                 "text-xs font-medium text-foreground"

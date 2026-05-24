@@ -110,14 +110,17 @@ class SqliteBackend(StorageBackend):
             ).fetchone()
         return DigestRun.model_validate_json(row["data"]) if row else None
 
-    def list_runs(self, limit: int = 20) -> list[DigestRun]:
+    def list_runs(self, limit: int = 20, offset: int = 0) -> list[DigestRun]:
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT data FROM digest_runs ORDER BY started_at DESC LIMIT ?", (limit,)
+                "SELECT data FROM digest_runs ORDER BY started_at DESC LIMIT ? OFFSET ?",
+                (limit, offset),
             ).fetchall()
         return [DigestRun.model_validate_json(r["data"]) for r in rows]
 
-    def list_news(self, *, category=None, importance=None, limit: int = 50) -> list[NewsItem]:
+    def list_news(
+        self, *, category=None, importance=None, limit: int = 50, offset: int = 0
+    ) -> list[NewsItem]:
         clauses, params = [], []
         if category is not None:
             clauses.append("category = ?")
@@ -126,10 +129,11 @@ class SqliteBackend(StorageBackend):
             clauses.append("importance = ?")
             params.append(importance.value)
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        params.append(limit)
+        params.extend([limit, offset])
         with self._conn() as conn:
             rows = conn.execute(
-                f"SELECT data FROM news_items{where} ORDER BY collected_at DESC LIMIT ?",
+                f"SELECT data FROM news_items{where} "
+                "ORDER BY collected_at DESC LIMIT ? OFFSET ?",
                 params,
             ).fetchall()
         return [NewsItem.model_validate_json(r["data"]) for r in rows]

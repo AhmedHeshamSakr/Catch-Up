@@ -1,5 +1,5 @@
 import { it, expect, vi, beforeEach } from "vitest";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 
 beforeEach(() => { vi.restoreAllMocks(); process.env.NEXT_PUBLIC_API_BASE = "http://test"; });
 
@@ -44,9 +44,28 @@ it("triggerRun POSTs /api/runs", async () => {
   expect(opts.method).toBe("POST");
 });
 
-it("throws ApiError on non-2xx", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status: 500 })));
-  await expect(api.getDashboard()).rejects.toThrow();
+it("throws ApiError on non-2xx without leaking the raw body into the message", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(new Response("<html>stack trace</html>", { status: 500 }))
+  );
+  const err = await api.getDashboard().catch((e) => e);
+  expect(err).toBeInstanceOf(ApiError);
+  expect(err.status).toBe(500);
+  expect(err.message).not.toContain("<html>");
+  expect(err.detail).toContain("<html>");
+});
+
+it("throws ApiError when a schema-validated response is malformed", async () => {
+  // total_items should be a number; backend returns a string → schema rejects.
+  const bad = { latest_run: null, recent_runs: [], category_counts: {}, total_items: "lots" };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(new Response(JSON.stringify(bad), { status: 200 }))
+  );
+  const err = await api.getDashboard().catch((e) => e);
+  expect(err).toBeInstanceOf(ApiError);
+  expect(err.status).toBe(0);
 });
 
 it("resolveSource POSTs /api/sources/resolve with type+url and returns parsed json", async () => {

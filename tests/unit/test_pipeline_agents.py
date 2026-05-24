@@ -23,6 +23,7 @@ from app.core.domain import (
     RunStatus,
     SourceType,
 )
+from app.llm.schema import ItemEnrichment, ProcessingResult
 from app.pipeline.agents import (
     DigestEditorAgent,
     GuardrailCriticAgent,
@@ -34,7 +35,6 @@ from app.pipeline.agents import (
     build_pipeline,
 )
 from app.pipeline.eval_schema import FaithfulnessVerdict
-from app.pipeline.schema import ItemEnrichment, ProcessingResult
 from app.services.watchlist import Watchlist
 
 # ---------------------------------------------------------------------------
@@ -211,6 +211,7 @@ async def test_source_collector_per_source_failure_adds_to_errors(tmp_path):
     storage = _storage(tmp_path)
 
     run = DigestRun(run_id="r1")
+    storage.create_run(run)
     state = {"run": run, "watchlist": Watchlist()}
 
     def boom_collect(source, settings, storage):
@@ -230,7 +231,19 @@ async def test_source_collector_per_source_failure_adds_to_errors(tmp_path):
     assert len(events) == 1
     # raws_rss is empty (collection failed)
     assert state["raws_rss"] == []
-    # Error recorded on run
+    # The parallel collector writes ONLY its own per-source error key —
+    # it must NOT mutate the shared run.source_errors yet.
+    assert run.source_errors == []
+    assert len(state["errors_raws_rss"]) == 1
+    assert state["errors_raws_rss"][0]["source_id"] == "rss-src"
+    assert "feed down" in state["errors_raws_rss"][0]["error"]
+
+    # NormalizeDedup merges per-source errors into run.source_errors.
+    normalize = NormalizeDedupAgent(
+        name="NormalizeDedup", settings=settings, storage=storage
+    )
+    await _run(normalize, state)
+
     assert len(run.source_errors) == 1
     assert run.source_errors[0]["source_id"] == "rss-src"
     assert "feed down" in run.source_errors[0]["error"]

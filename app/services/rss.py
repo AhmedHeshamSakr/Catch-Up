@@ -4,16 +4,16 @@ import calendar
 from datetime import UTC, datetime
 
 import feedparser
-import httpx
 
 from app.core.config import SourceConfig
 from app.core.domain import RawItem, SourceType
+from app.services.net import safe_get
 
 _HEADERS = {"User-Agent": "CatchUp/0.1 (+https://github.com/AhmedHeshamSakr/Catch-Up)"}
 
 
 def fetch_feed(url: str, timeout: float = 10.0) -> bytes:
-    resp = httpx.get(url, timeout=timeout, follow_redirects=True, headers=_HEADERS)
+    resp = safe_get(url, timeout=timeout, headers=_HEADERS)
     resp.raise_for_status()
     return resp.content
 

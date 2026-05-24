@@ -58,7 +58,7 @@ export function RunHealthCard({ run }: RunHealthCardProps) {
       <CardFooter>
         <Link
           href={`/digests/${run.run_id}`}
-          className="text-xs text-cyan hover:underline underline-offset-4 transition-colors"
+          className="text-xs text-link underline underline-offset-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
         >
           View run detail →
         </Link>

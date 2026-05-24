@@ -3,7 +3,7 @@ import os
 
 def test_ensure_api_key_sets_env_when_present(monkeypatch):
     from app.core.config import Settings
-    from app.pipeline.adk_runtime import ensure_api_key
+    from app.llm.runtime import ensure_api_key
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     ensure_api_key(Settings(google_api_key="abc123"))
     assert os.environ["GOOGLE_API_KEY"] == "abc123"

@@ -1,3 +1,5 @@
+import pytest
+
 from app.core.config import SourceConfig
 from app.core.domain import Category, SourceType
 from app.services import newsapi
@@ -50,3 +52,17 @@ def test_collect_uses_injected_fetch():
 
 def test_collect_empty_without_api_key():
     assert newsapi.collect(_source(), "", fetch=lambda *a, **k: SAMPLE) == []
+
+
+def test_fetch_gnews_rejects_private_address():
+    """The DEFAULT GNews fetch path must reject a host resolving to a private IP.
+
+    Injects a resolver mapping the GNews host to a link-local metadata IP so no
+    real DNS/network call happens — the SSRF guard must raise before the request.
+    """
+    from app.services.net import UnsafeURLError
+
+    with pytest.raises(UnsafeURLError):
+        newsapi.fetch_gnews(
+            "ai", "KEY123", resolver=lambda host: ["169.254.169.254"]
+        )

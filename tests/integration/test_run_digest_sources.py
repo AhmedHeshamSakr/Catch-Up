@@ -1,7 +1,7 @@
 from app import runner
 from app.core.config import Settings
 from app.core.domain import Category, RawItem, RunStatus, SourceType
-from app.pipeline.schema import ProcessingResult
+from app.llm.schema import ProcessingResult
 
 
 def _settings(tmp_path, sources_yaml):

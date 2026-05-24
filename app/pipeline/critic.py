@@ -9,7 +9,7 @@ from google.adk.agents import Agent
 
 from app.core.config import Settings
 from app.core.domain import Importance, NewsItem
-from app.pipeline.adk_runtime import run_agent_text
+from app.llm.runtime import run_agent_text
 from app.pipeline.eval_schema import FaithfulnessVerdict, FaithfulnessVerdicts
 from app.pipeline.processing import score_to_importance
 from app.services.watchlist import Watchlist, watchlist_matched

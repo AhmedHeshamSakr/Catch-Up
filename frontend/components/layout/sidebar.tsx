@@ -103,18 +103,17 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Workspace switcher */}
+      {/* Workspace indicator — presentational, no switcher wired up yet */}
       <div className="px-3 pb-3">
-        <button
-          type="button"
-          className="flex w-full items-center justify-between rounded-lg border border-border bg-muted/40 px-3 py-2 text-left transition-colors hover:bg-muted"
-          aria-label="Switch workspace"
-        >
+        <div className="flex w-full items-center justify-between rounded-lg border border-border bg-muted/40 px-3 py-2 text-left">
           <span className="text-xs font-medium text-foreground">
             Default workspace
           </span>
-          <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground" />
-        </button>
+          <ChevronsUpDown
+            className="h-3.5 w-3.5 text-muted-foreground"
+            aria-hidden="true"
+          />
+        </div>
       </div>
 
       <Separator className="mx-3 w-auto" />
@@ -135,7 +134,7 @@ export function Sidebar() {
                     <Link
                       href={item.href}
                       className={cn(
-                        "group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-150",
+                        "group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                         active
                           ? "bg-sidebar-accent text-sidebar-accent-foreground"
                           : "text-sidebar-foreground/70 hover:bg-muted hover:text-sidebar-foreground"
@@ -178,19 +177,15 @@ export function Sidebar() {
           <ThemeToggle />
         </div>
 
-        {/* Profile row */}
-        <button
-          type="button"
-          className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted"
-          aria-label="User profile"
-        >
+        {/* Profile row — presentational, no account menu wired up yet */}
+        <div className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left">
           <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border bg-muted">
             <User className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
           </div>
           <span className="text-xs font-medium text-muted-foreground">
             Default user
           </span>
-        </button>
+        </div>
       </div>
     </aside>
   );

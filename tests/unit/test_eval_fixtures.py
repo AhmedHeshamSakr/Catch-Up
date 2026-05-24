@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.pipeline.schema import ItemEnrichment
+from app.llm.schema import ItemEnrichment
 
 _FIXTURE_PATH = (
     Path(__file__).resolve().parents[2]

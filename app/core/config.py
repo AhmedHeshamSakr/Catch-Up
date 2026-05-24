@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.domain import Category, Importance, SourceType
@@ -25,6 +26,18 @@ class SourceConfig(BaseModel):
     channel_id: str | None = None  # explicit YouTube channel id (UC…)
     enabled: bool = True
 
+    @field_validator("url")
+    @classmethod
+    def _reject_dangerous_scheme(cls, value: str | None) -> str | None:
+        # url is optional (api/query sources omit it). When present it must be
+        # http(s); reject file:/javascript:/etc. to prevent injection/SSRF.
+        if value is None:
+            return value
+        scheme = urlparse(value).scheme
+        if scheme not in ("http", "https"):
+            raise ValueError(f"url scheme not allowed: {scheme!r}")
+        return value
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=("app/.env", ".env"), extra="ignore")
@@ -44,6 +57,11 @@ class Settings(BaseSettings):
     critic_min_importance: Importance = Importance.HIGH
     critic_check_watchlisted: bool = True
     critic_action: Literal["flag", "downrank", "replace"] = "downrank"
+    # API security. api_key=None leaves the API open (local/dev default).
+    api_key: str | None = None
+    # Token-bucket rate limit for POST /runs and POST /sources/resolve.
+    rate_limit_burst: int = 30
+    rate_limit_refill_per_sec: float = 1.0
 
 
 def load_sources(config_dir: str | Path) -> list[SourceConfig]:

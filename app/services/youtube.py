@@ -8,11 +8,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import feedparser
-import httpx
 
 from app.core.config import Settings, SourceConfig
 from app.core.domain import RawItem, SourceType, make_item_id
-from app.pipeline.adk_runtime import run_agent_text
+from app.llm.runtime import run_agent_text
+from app.services.net import safe_get
 
 log = logging.getLogger(__name__)
 
@@ -45,9 +45,12 @@ def channel_feed_url(channel_id: str) -> str:
     return f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
 
 
-def _default_fetch(channel_id: str) -> bytes:
+def _default_fetch(channel_id: str, *, resolver=None) -> bytes:
     url = channel_feed_url(channel_id)
-    resp = httpx.get(url, timeout=15.0, follow_redirects=True, headers=_HEADERS)
+    kwargs = {"timeout": 15.0, "headers": _HEADERS}
+    if resolver is not None:
+        kwargs["resolver"] = resolver
+    resp = safe_get(url, **kwargs)
     resp.raise_for_status()
     return resp.content
 
@@ -206,7 +209,7 @@ def build_youtube_summary_agent(model: str):
     """Build a search-free ADK agent that summarizes a transcript."""
     from google.adk.agents import Agent
 
-    from app.pipeline.schema import DigestNarrative  # reuse {narrative: str} shape
+    from app.llm.schema import DigestNarrative  # reuse {narrative: str} shape
 
     return Agent(
         name="youtube_summarizer",
@@ -219,7 +222,7 @@ def build_youtube_summary_agent(model: str):
 
 def adk_summarize(text: str, settings: Settings) -> str:
     """Run the summarizer agent on ``text`` and return a short blurb."""
-    from app.pipeline.schema import DigestNarrative
+    from app.llm.schema import DigestNarrative
 
     agent = build_youtube_summary_agent(settings.llm_model)
     raw = run_agent_text(agent, text, settings)
@@ -255,12 +258,10 @@ def collect(
     """
     from app.services.youtube_resolve import resolve_channel_id
 
-    # Resolve channel id
+    # Resolve channel id (uses resolve_channel_id's SSRF-guarded default fetch)
     channel_id = source.channel_id
     if not channel_id and source.url:
-        channel_id = resolve_channel_id(source.url, fetch=lambda url: httpx.get(
-            url, timeout=15.0, follow_redirects=True, headers=_HEADERS
-        ).content)
+        channel_id = resolve_channel_id(source.url)
     if not channel_id:
         log.warning("YouTube source %s: no channel_id and could not resolve from url", source.id)
         return []

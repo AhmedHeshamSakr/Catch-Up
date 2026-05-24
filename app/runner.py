@@ -85,6 +85,8 @@ def run_digest(
     narrator=None,
     critic=None,
 ) -> DigestRun:
+    # Deferred: app.pipeline.agents imports this module at top level, so
+    # importing it here at module scope would reintroduce a load-time cycle.
     from app.pipeline.agents import build_pipeline
 
     settings = settings or Settings()

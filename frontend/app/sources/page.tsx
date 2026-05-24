@@ -8,7 +8,7 @@ import { api, ApiError } from "@/lib/api";
 import type { SourceConfig } from "@/lib/types";
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState } from "@/components/common/empty-state";
-import { ErrorState } from "@/components/common/error-state";
+import { AsyncBoundary } from "@/components/common/async-boundary";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
@@ -131,50 +131,45 @@ export default function SourcesPage() {
         }
       />
 
-      {isLoading && !sources && <SourcesSkeleton />}
-
-      {error && !sources && (
-        <Card>
-          <CardContent className="py-0">
-            <ErrorState
-              title="Couldn't load sources"
-              description="Is the API running on :8000?"
-              onRetry={() => mutate()}
-            />
-          </CardContent>
-        </Card>
-      )}
-
-      {sources && sources.length === 0 && (
-        <Card>
-          <CardContent className="py-0">
-            <EmptyState
-              icon={Rss}
-              title="No sources yet"
-              description="Add your first news source to start collecting."
-              action={
-                <Button onClick={openAdd}>
-                  <Plus />
-                  Add source
-                </Button>
-              }
-            />
-          </CardContent>
-        </Card>
-      )}
-
-      {sources && sources.length > 0 && (
-        <Card>
-          <CardContent className="py-0 px-0">
-            <SourceTable
-              sources={sources}
-              onEdit={openEdit}
-              onDelete={openDelete}
-              onToggle={handleToggle}
-            />
-          </CardContent>
-        </Card>
-      )}
+      <AsyncBoundary
+        isLoading={isLoading && !sources}
+        error={error && !sources ? error : undefined}
+        isEmpty={!!sources && sources.length === 0}
+        onRetry={() => mutate()}
+        errorTitle="Couldn't load sources"
+        errorDescription="Is the API running on :8000?"
+        skeleton={<SourcesSkeleton />}
+        empty={
+          <Card>
+            <CardContent className="py-0">
+              <EmptyState
+                icon={Rss}
+                title="No sources yet"
+                description="Add your first news source to start collecting."
+                action={
+                  <Button onClick={openAdd}>
+                    <Plus />
+                    Add source
+                  </Button>
+                }
+              />
+            </CardContent>
+          </Card>
+        }
+      >
+        {sources && sources.length > 0 && (
+          <Card>
+            <CardContent className="py-0 px-0">
+              <SourceTable
+                sources={sources}
+                onEdit={openEdit}
+                onDelete={openDelete}
+                onToggle={handleToggle}
+              />
+            </CardContent>
+          </Card>
+        )}
+      </AsyncBoundary>
 
       {/* Add / Edit dialog */}
       <SourceFormDialog

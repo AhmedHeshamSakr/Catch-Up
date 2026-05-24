@@ -109,7 +109,7 @@ export default function RunDetailPage() {
               action={
                 <Link
                   href="/digests"
-                  className="text-sm text-cyan hover:underline"
+                  className="text-sm text-link underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
                 >
                   Back to digests
                 </Link>
@@ -186,10 +186,10 @@ export default function RunDetailPage() {
           <div className="flex flex-col gap-1.5">
             {run.source_errors.map((err, i) => (
               <div key={i} className="flex flex-col gap-0.5">
-                <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+                <p className="text-xs font-medium text-amber-900 dark:text-amber-300">
                   {String((err as Record<string, unknown>).source_id ?? "unknown")}
                 </p>
-                <p className="text-xs text-amber-600 dark:text-amber-500 font-mono">
+                <p className="text-xs text-amber-800 dark:text-amber-400 font-mono">
                   {String(
                     (err as Record<string, unknown>).error ??
                       JSON.stringify(err)

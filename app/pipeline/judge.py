@@ -8,9 +8,9 @@ from google.adk.agents import Agent
 
 from app.core.config import Settings
 from app.core.domain import NewsItem
-from app.pipeline.adk_runtime import run_agent_text
+from app.llm.runtime import run_agent_text
+from app.llm.schema import ItemEnrichment
 from app.pipeline.eval_schema import EnrichmentVerdict, EnrichmentVerdicts
-from app.pipeline.schema import ItemEnrichment
 
 _PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
 # faithfulness_rubric.md is the single source of the rubric, shared with the runtime

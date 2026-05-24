@@ -14,6 +14,8 @@
   /* Signal accent utilities */
   --color-emerald: var(--emerald);
   --color-cyan: var(--cyan);
+  /* Text-link cyan — darkened for WCAG AA (kept separate from --cyan accent/chart) */
+  --color-link: var(--link);
 
   /* Importance colors */
   --color-importance-high: var(--importance-high);
@@ -75,6 +77,8 @@
   --sub: #64748B;
   --emerald: #059669;
   --cyan: #0891B2;
+  /* cyan-700 — AA-contrast (~4.7:1) for text links on white/card */
+  --link: #0E7490;
 
   /* Importance palette */
   --importance-high: #DC2626;
@@ -132,6 +136,8 @@
   --sub: #94A3B8;
   --emerald: #34D399;
   --cyan: #22D3EE;
+  /* cyan-300 — AA-contrast for text links on the dark card */
+  --link: #67E8F9;
 
   /* Importance palette */
   --importance-high: #EF4444;
@@ -185,5 +191,18 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+/* Respect user motion preferences — neutralizes pulsing dots, dialog/sheet
+   zoom-ins, skeleton pulse, and category-bar transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

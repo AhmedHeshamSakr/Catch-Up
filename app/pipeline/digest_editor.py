@@ -8,8 +8,8 @@ from google.adk.agents import Agent
 
 from app.core.config import Settings
 from app.core.domain import NewsItem
-from app.pipeline.adk_runtime import run_agent_text
-from app.pipeline.schema import DigestNarrative
+from app.llm.runtime import run_agent_text
+from app.llm.schema import DigestNarrative
 
 NarrateFn = Callable[[list[NewsItem]], str]
 

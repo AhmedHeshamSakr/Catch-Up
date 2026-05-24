@@ -3,9 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
-import httpx
-
-from app.services.net import validate_public_url
+from app.services.net import safe_get
 
 _HEADERS = {"User-Agent": "CatchUp/0.1 (+https://github.com/AhmedHeshamSakr/Catch-Up)"}
 
@@ -20,8 +18,8 @@ def _is_channel_id(value: str) -> bool:
 
 
 def _fetch(url: str) -> bytes:
-    validate_public_url(url)  # SSRF guard — reject private/loopback/non-http(s) hosts
-    resp = httpx.get(url, timeout=15.0, follow_redirects=True, headers=_HEADERS)
+    # SSRF guard — per-hop validation rejects private/loopback/non-http(s) hosts
+    resp = safe_get(url, timeout=15.0, headers=_HEADERS)
     resp.raise_for_status()
     return resp.content
 

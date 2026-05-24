@@ -4,13 +4,13 @@ from __future__ import annotations
 import json
 
 from app.core.domain import Category, NewsItem, Sentiment, SourceType
+from app.llm.schema import ItemEnrichment
 from app.pipeline.eval_schema import (
     DimensionVerdict,
     EnrichmentVerdict,
     EnrichmentVerdicts,
 )
 from app.pipeline.judge import _judge_payload, build_judge_agent
-from app.pipeline.schema import ItemEnrichment
 
 
 def _make_news_item(item_id: str, title: str, excerpt: str = "") -> NewsItem:

@@ -1,7 +1,7 @@
 from app import runner
 from app.core.config import Settings
 from app.core.domain import Category, RawItem, RunStatus, SourceType
-from app.pipeline.schema import ItemEnrichment, ProcessingResult
+from app.llm.schema import ItemEnrichment, ProcessingResult
 
 
 def _raw(url, title):
