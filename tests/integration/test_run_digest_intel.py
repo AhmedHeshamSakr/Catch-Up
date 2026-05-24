@@ -32,7 +32,8 @@ def test_run_digest_enriches_and_writes_narrative(tmp_path, monkeypatch):
             summary_en="A summary.", summary_ar="ملخص.", entities=[], sentiment="neutral")])
 
     run = runner.run_digest(settings=settings, processor=fake_processor,
-                            narrator=lambda items: "What matters most today.")
+                            narrator=lambda items: "What matters most today.",
+                            critic=lambda items: [])
 
     assert run.status == RunStatus.SUCCESS
     assert run.new == 1
@@ -51,7 +52,8 @@ def test_run_digest_degrades_when_processing_fails(tmp_path, monkeypatch):
     def boom(items):
         raise RuntimeError("LLM quota exhausted")
 
-    run = runner.run_digest(settings=settings, processor=boom, narrator=lambda i: "x")
+    run = runner.run_digest(settings=settings, processor=boom, narrator=lambda i: "x",
+                            critic=lambda items: [])
     # Collection still succeeded; processing degraded → run not FAILED, items stored raw, error logged
     assert run.status in (RunStatus.SUCCESS, RunStatus.PARTIAL)
     assert any(e.get("stage") == "processing" for e in run.source_errors)
@@ -71,7 +73,8 @@ def test_run_digest_writes_all_three_outputs(tmp_path, monkeypatch):
             summary_en="A summary.", summary_ar="ملخص.", entities=[], sentiment="neutral")])
 
     run = runner.run_digest(settings=settings, processor=fake_processor,
-                            narrator=lambda items: "Narrative.")
+                            narrator=lambda items: "Narrative.",
+                            critic=lambda items: [])
     from pathlib import Path
     assert set(run.outputs) == {"md", "xlsx", "html"}
     for kind in ("md", "xlsx", "html"):

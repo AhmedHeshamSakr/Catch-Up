@@ -32,6 +32,7 @@ def test_dispatch_collects_from_api_and_scrape(tmp_path, monkeypatch):
                             category_hint=Category.BUSINESS_FINANCE)])
     run = runner.run_digest(settings=settings,
                             processor=lambda items: ProcessingResult(items=[]),
-                            narrator=lambda items: "")
+                            narrator=lambda items: "",
+                            critic=lambda items: [])
     assert run.status == RunStatus.SUCCESS
     assert run.collected == 2  # one from api, one from scrape

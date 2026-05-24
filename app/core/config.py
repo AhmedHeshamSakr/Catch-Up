@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.core.domain import Category, SourceType
+from app.core.domain import Category, Importance, SourceType
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -39,6 +40,10 @@ class Settings(BaseSettings):
     gnews_api_key: str = ""
     youtube_whisper_enabled: bool = False
     whisper_model: str = "base"
+    critic_enabled: bool = True
+    critic_min_importance: Importance = Importance.HIGH
+    critic_check_watchlisted: bool = True
+    critic_action: Literal["flag", "downrank", "replace"] = "downrank"
 
 
 def load_sources(config_dir: str | Path) -> list[SourceConfig]:
