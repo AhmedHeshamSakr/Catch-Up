@@ -5,11 +5,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 from google.adk.agents import Agent
-from google.adk.runners import InMemoryRunner
-from google.genai import types
 
 from app.core.config import Settings
 from app.core.domain import NewsItem
+from app.pipeline.adk_runtime import run_agent_text
 from app.pipeline.schema import DigestNarrative
 
 NarrateFn = Callable[[list[NewsItem]], str]
@@ -38,14 +37,9 @@ def build_editor_agent(model: str) -> Agent:
 
 def adk_narrate(items: list[NewsItem], settings: Settings) -> str:
     agent = build_editor_agent(settings.llm_model)
-    runner = InMemoryRunner(agent=agent, app_name="catchup")
-    session = runner.session_service.create_session_sync(app_name="catchup", user_id="system")
     payload = json.dumps(
-        [{"title": i.title, "summary": i.summary_en, "category": (i.category.value if i.category else None)}
-         for i in items], ensure_ascii=False)
-    message = types.Content(role="user", parts=[types.Part.from_text(text=payload)])
-    text = ""
-    for event in runner.run(user_id="system", session_id=session.id, new_message=message):
-        if event.is_final_response() and event.content and event.content.parts:
-            text = event.content.parts[0].text or ""
+        [{"title": i.title, "summary": i.summary_en,
+          "category": (i.category.value if i.category else None)} for i in items],
+        ensure_ascii=False)
+    text = run_agent_text(agent, payload, settings)
     return DigestNarrative.model_validate_json(text).narrative

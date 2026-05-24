@@ -5,11 +5,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 from google.adk.agents import Agent
-from google.adk.runners import InMemoryRunner
-from google.genai import types
 
 from app.core.config import Settings
 from app.core.domain import Importance, NewsItem
+from app.pipeline.adk_runtime import run_agent_text
 from app.pipeline.schema import ProcessingResult
 from app.services.watchlist import Watchlist, apply_boost
 
@@ -52,13 +51,7 @@ def build_processing_agent(model: str) -> Agent:
 def adk_enrich(items: list[NewsItem], settings: Settings) -> ProcessingResult:
     """Real LLM call. Validated by the live smoke (needs GOOGLE_API_KEY)."""
     agent = build_processing_agent(settings.llm_model)
-    runner = InMemoryRunner(agent=agent, app_name="catchup")
-    session = runner.session_service.create_session_sync(app_name="catchup", user_id="system")
-    message = types.Content(role="user", parts=[types.Part.from_text(text=_items_json(items))])
-    text = ""
-    for event in runner.run(user_id="system", session_id=session.id, new_message=message):
-        if event.is_final_response() and event.content and event.content.parts:
-            text = event.content.parts[0].text or ""
+    text = run_agent_text(agent, _items_json(items), settings)
     return ProcessingResult.model_validate_json(text)
 
 
