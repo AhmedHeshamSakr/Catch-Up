@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     llm_timeout: float = 60.0
     llm_max_retries: int = 2
     llm_backoff_base: float = 0.5
+    # Optional run-level wall-clock cap (seconds). None = no cap (default; the
+    # whole digest run can take as long as it needs). When set, the tree
+    # execution is wrapped in asyncio.wait_for so a stuck stage can't hang the
+    # run forever; on timeout the run finalizes FAILED and the error re-raises.
+    run_timeout: float | None = None
     # Deterministic generation for structured-output agents.
     llm_temperature: float = 0.0
     gnews_api_key: str = ""

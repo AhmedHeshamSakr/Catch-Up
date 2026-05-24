@@ -53,6 +53,32 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
+# Source-of-truth: collected source types and their state keys
+# ---------------------------------------------------------------------------
+
+# Single source of truth for which SourceTypes are collected by the pipeline.
+# Both the per-type collector nodes and the NormalizeDedup merge iterate this,
+# so adding a SourceType here wires it through collection AND merging — no more
+# silently dropping a source by forgetting to update a second hardcoded list.
+COLLECTED_SOURCE_TYPES: tuple[SourceType, ...] = (
+    SourceType.RSS,
+    SourceType.SCRAPE,
+    SourceType.API,
+    SourceType.SEARCH,
+    SourceType.YOUTUBE,
+)
+
+
+def state_key_for(source_type: SourceType) -> str:
+    """State key holding the raw items collected for ``source_type``.
+
+    Returns the existing literals (``raws_rss`` … ``raws_youtube``) so storage
+    and tests are unaffected; the matching errors key is ``errors_<key>``.
+    """
+    return f"raws_{source_type.value}"
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -179,7 +205,8 @@ class NormalizeDedupAgent(BaseAgent):
         run: DigestRun = state["run"]
 
         all_raws = []
-        for key in ("raws_rss", "raws_scrape", "raws_api", "raws_search", "raws_youtube"):
+        for source_type in COLLECTED_SOURCE_TYPES:
+            key = state_key_for(source_type)
             all_raws.extend(state.get(key) or [])
             # Merge per-source collector errors (safe: this stage is single-threaded).
             run.source_errors.extend(state.get(f"errors_{key}") or [])
@@ -400,49 +427,21 @@ def build_pipeline(
     _critic = critic or _default_critic(settings)
     _reprocessor = reprocessor or _default_reprocessor(settings)
 
+    # Build one collector per collected SourceType from the shared
+    # source-of-truth, so the node keys and the NormalizeDedup merge keys can
+    # never drift apart. Names preserve the existing literals (CollectRss …).
     collect_sources = ParallelAgent(
         name="CollectSources",
         sub_agents=[
             SourceCollectorAgent(
-                name="CollectRss",
-                source_type=SourceType.RSS,
-                state_key="raws_rss",
+                name=f"Collect{source_type.value.capitalize()}",
+                source_type=source_type,
+                state_key=state_key_for(source_type),
                 settings=settings,
                 storage=storage,
                 collect_fn=_collect_fn,
-            ),
-            SourceCollectorAgent(
-                name="CollectScrape",
-                source_type=SourceType.SCRAPE,
-                state_key="raws_scrape",
-                settings=settings,
-                storage=storage,
-                collect_fn=_collect_fn,
-            ),
-            SourceCollectorAgent(
-                name="CollectApi",
-                source_type=SourceType.API,
-                state_key="raws_api",
-                settings=settings,
-                storage=storage,
-                collect_fn=_collect_fn,
-            ),
-            SourceCollectorAgent(
-                name="CollectSearch",
-                source_type=SourceType.SEARCH,
-                state_key="raws_search",
-                settings=settings,
-                storage=storage,
-                collect_fn=_collect_fn,
-            ),
-            SourceCollectorAgent(
-                name="CollectYoutube",
-                source_type=SourceType.YOUTUBE,
-                state_key="raws_youtube",
-                settings=settings,
-                storage=storage,
-                collect_fn=_collect_fn,
-            ),
+            )
+            for source_type in COLLECTED_SOURCE_TYPES
         ],
     )
 

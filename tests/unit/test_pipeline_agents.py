@@ -888,3 +888,60 @@ def test_build_pipeline_run_id_param_accepted(tmp_path):
 
     pipeline = build_pipeline(settings, storage, run_id="explicit-run-id")
     assert pipeline is not None
+
+
+# ---------------------------------------------------------------------------
+# SourceType -> state-key: single source of truth
+# ---------------------------------------------------------------------------
+
+from app.pipeline.agents import COLLECTED_SOURCE_TYPES, state_key_for  # noqa: E402
+
+
+def test_state_key_for_matches_existing_literals():
+    """state_key_for must reproduce the historical raws_* literals exactly so
+    storage and existing tests are unaffected."""
+    assert [state_key_for(t) for t in COLLECTED_SOURCE_TYPES] == [
+        "raws_rss", "raws_scrape", "raws_api", "raws_search", "raws_youtube"
+    ]
+    for t in COLLECTED_SOURCE_TYPES:
+        assert state_key_for(t) == f"raws_{t.value}"
+
+
+def test_collector_nodes_and_merge_derive_from_same_source(tmp_path):
+    """Every collected SourceType must have a collector node AND be merged by
+    NormalizeDedup — both derived from COLLECTED_SOURCE_TYPES, so a new type
+    can never be wired into one but silently dropped by the other."""
+    settings = _settings(tmp_path)
+    storage = _storage(tmp_path)
+
+    pipeline = build_pipeline(settings, storage)
+    collect_sources = pipeline.sub_agents[1]
+
+    node_types = {a.source_type for a in collect_sources.sub_agents}
+    node_keys = {a.state_key for a in collect_sources.sub_agents}
+
+    # Collector nodes cover exactly the source-of-truth set.
+    assert node_types == set(COLLECTED_SOURCE_TYPES)
+    # Their keys are exactly the keys the merge will read.
+    assert node_keys == {state_key_for(t) for t in COLLECTED_SOURCE_TYPES}
+
+
+@pytest.mark.asyncio
+async def test_normalize_dedup_merges_every_collected_source_type(tmp_path):
+    """Drive NormalizeDedup with one raw per collected SourceType and assert all
+    of them are merged (proves the merge iterates the same source-of-truth)."""
+    settings = _settings(tmp_path)
+    storage = _storage(tmp_path)
+
+    run = DigestRun(run_id="r1")
+    storage.create_run(run)
+
+    state: dict = {"run": run, "watchlist": Watchlist()}
+    for i, t in enumerate(COLLECTED_SOURCE_TYPES):
+        state[state_key_for(t)] = [_raw(f"https://merge.test/{i}", f"Item {t.value}", t)]
+
+    agent = NormalizeDedupAgent(name="NormalizeDedup", settings=settings, storage=storage)
+    await _run(agent, state)
+
+    assert run.collected == len(COLLECTED_SOURCE_TYPES)
+    assert len(state["items"]) == len(COLLECTED_SOURCE_TYPES)
