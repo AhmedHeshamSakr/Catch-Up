@@ -12,7 +12,7 @@ import feedparser
 from app.core.config import Settings, SourceConfig
 from app.core.domain import RawItem, SourceType, make_item_id
 from app.llm.runtime import run_agent_text
-from app.services.net import safe_get
+from app.services.net import is_http_url, safe_get
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ class Video:
     title: str
     published_at: datetime | None = None
     description: str = field(default="")
+    image_url: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -91,12 +92,22 @@ def parse_channel_feed(content: bytes) -> list[Video]:
             or ""
         )
 
+        # Thumbnail: yt entries carry media:thumbnail (the video thumbnail);
+        # feedparser exposes it as media_thumbnail (list of dicts with a url).
+        image_url: str | None = None
+        for thumb in entry.get("media_thumbnail") or []:
+            candidate = thumb.get("url")
+            if is_http_url(candidate):
+                image_url = candidate
+                break
+
         videos.append(Video(
             video_id=video_id,
             url=link,
             title=title.strip(),
             published_at=published_at,
             description=description.strip(),
+            image_url=image_url,
         ))
     return videos
 
@@ -294,6 +305,7 @@ def collect(
             url=video.url,
             title=video.title,
             excerpt=excerpt,
+            image_url=video.image_url,
             published_at=video.published_at,
             category_hint=source.category_hint,
         ))

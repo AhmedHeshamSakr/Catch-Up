@@ -1,6 +1,6 @@
 import pytest
 
-from app.services.net import UnsafeURLError, validate_public_url
+from app.services.net import UnsafeURLError, is_http_url, validate_public_url
 
 
 def _resolver(ips):
@@ -38,3 +38,17 @@ def test_rejects_multicast_reserved_unspecified():
     for ip in ("224.0.0.1", "240.0.0.1", "0.0.0.0"):
         with pytest.raises(UnsafeURLError):
             validate_public_url("http://x.example", resolver=_resolver([ip]))
+
+
+def test_is_http_url_accepts_http_and_https():
+    assert is_http_url("http://img.example/a.jpg")
+    assert is_http_url("https://img.example/a.jpg")
+
+
+def test_is_http_url_rejects_other_schemes_and_relative_and_none():
+    assert not is_http_url("javascript:alert(1)")
+    assert not is_http_url("data:image/png;base64,AAAA")
+    assert not is_http_url("/relative/path.jpg")
+    assert not is_http_url("ftp://img.example/a.jpg")
+    assert not is_http_url("")
+    assert not is_http_url(None)
