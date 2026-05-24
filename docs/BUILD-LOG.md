@@ -129,6 +129,22 @@ Executed subagent-driven on `feat/api` (implementer per batch + spec/quality rev
 - **Batch N — Task 5** (`catchup serve` CLI + README API table): commit `7ede503` + doc fix `…` (auto-docs at `/docs`).
 - **Result:** `uv run pytest tests -q` → **62 passed**; `uv run --extra lint ruff check app tests scripts` → clean. `uv run python -m app.cli serve` boots; `/api/health` + `/docs` return 200. All commits authored solely by AhmedHeshamSakr.
 
+### Phase: Plan 6 — Next.js "Signal" console (planning)
+- **PR #5 merged → `main`** (34 commits). Synced `main`, branched `feat/console`. Wrote **Plan 6** → `docs/superpowers/plans/2026-05-24-plan6-console.md`: a Next.js console (`frontend/`, sibling of `app/`) consuming the FastAPI, in the "Signal" design language.
+- **Scope decision (API-backed slice):** ship the 4 screens the API fully supports today — **Dashboard, Digests (list + detail), Sources (CRUD), Watchlist** — plus a filterable **News** feed (the `/api/news` endpoint is already rich) and a global **Run now** action. The spec's other screens (Categories, Pipeline, Schedule, Settings) need new backend endpoints → deferred to later plans. Keeps Plan 6 quota-free and shippable.
+
+### Phase: Execution — Plan 6 (Next.js Console) ✅
+Executed subagent-driven on `feat/console` (fresh implementer per task + a review gate each). Stack: **Next.js 16** (App Router, React 19), TypeScript, Tailwind v4, **shadcn/ui on `@base-ui/react`** (not Radix — surfaced during scaffold), `next-themes` (Auto = system default), SWR, Lucide, Inter + IBM Plex Mono, Vitest + RTL. All tests offline (mocked `fetch`).
+- **T1 — Scaffold + Signal shell** (`e898804`): enterprise sidebar, theme toggle (light/dark/system), fonts, Signal CSS tokens (light/dark), health pill. Review fixes: moved `shadcn` CLI to devDeps, deleted boilerplate `public/*.svg`, HealthPill unmount guard.
+- **T2 — API client + hooks** (`ca2bc61`): typed `lib/api.ts` (+`ApiError`), `lib/hooks.ts` (SWR), `lib/format.ts`. 18 offline tests. Review fixes: header-merge order in `request()`, `useNews` default `{}` + normalized SWR key.
+- **T3 — Dashboard** (`0e2275c`): stat cards, "what matters most" narrative, category breakdown bars, run-health card, **Run now** button (toasts, `mutate`). Shared `ImportanceBadge`/`StatusBadge`/`EmptyState`/`ErrorState`. Review fixes: `"use client"` on ErrorState, `font-sans` on StatusBadge.
+- **T4 — Digests** (`cc240c2`): runs table + run detail (`useParams` under Next 16) with items grouped by category, defensive `source_errors`, `OutputLinks` (read-only server paths), reusable `NewsCard`. Carry-over polish landed in T7.
+- **T5 — Sources CRUD** (`834bafc`): type-aware add/edit dialog (native `<select>` + key-remount form state), live enable toggle; **every mutation sends the full list** via `putSources` (backend replaces wholesale). Pure `lib/sources.ts` (`fieldsForType`/`validateSource`) with 16 tests. Review fix: literal `&apos;` in a JSX attribute.
+- **T6 — Watchlist + News** (`5b43c88`): tag editor (case-insensitive dedupe, tested `addTag`) with dirty-tracked save; filterable news feed (category/importance/limit). Key-remount seeding avoids the repo's `react-hooks/set-state-in-effect` lint error.
+- **T7 — Polish + docs** (`240dff9`, this commit): full-row click nav on the digests table (keyboard links preserved); emoji/`dangerouslySetInnerHTML` sweep clean; README "Web Console" section; this log.
+- **Result:** `cd frontend && npm test` → **39 passed (5 files)**; `npx tsc --noEmit`, `npm run lint`, `npm run build` all clean (7 routes). Every commit authored solely by AhmedHeshamSakr.
+
 ### Next
-- **PR #5 open** → https://github.com/AhmedHeshamSakr/Catch-Up/pull/5 (`feat/api` → `main`), awaiting review/merge.
-- After merge → **Plan 6 — Next.js "Signal" console** (consumes this API); then Plan 7 — search-grounding + `run_async` (when Gemini quota resets).
+- **PR #6** (`feat/console` → `main`) — open for review/merge.
+- After merge → **Plan 7 — Google Search grounding collector + migrate ADK sync `runner.run` → `run_async`** (deferred until the Gemini AI Studio free-tier quota resets). Then Plan 8 orchestration (full ADK SequentialAgent tree) · Plan 9 GCP prod (Firestore / Cloud Run / Cloud Scheduler / Vertex).
+- Console screens deferred to later plans (need new API endpoints): Categories, Pipeline (agent-tree config), Runs & Schedule, Settings (provider/keys).

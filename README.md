@@ -74,6 +74,33 @@ uv run python -m app.cli serve --host 0.0.0.0 --port 8080
 | `POST /api/runs` | Trigger a new digest run (async) |
 | `GET /docs` | FastAPI auto-generated interactive docs (OpenAPI) |
 
+## Web Console
+
+A **Next.js** console (in `frontend/`) in the "Signal" design language — Inter + IBM Plex Mono, emerald/cyan accents, light + dark with **Auto = system default**, Lucide icons, enterprise sidebar. It reads digests and configures the agent over the REST API above.
+
+```bash
+# 1. Start the API (separate terminal, from the repo root)
+uv run python -m app.cli serve            # http://127.0.0.1:8000
+
+# 2. Start the console
+cd frontend
+npm install
+cp .env.local.example .env.local          # NEXT_PUBLIC_API_BASE=http://localhost:8000
+npm run dev                                # http://localhost:3000
+```
+
+Screens:
+
+| Screen | What it does |
+|---|---|
+| **Dashboard** | Stats, "what matters most" narrative, by-category breakdown, latest-run health |
+| **Digests** | Browse past runs; open a run to see grouped, summarized items + output files |
+| **News** | Filterable feed of collected items (category · importance · limit) |
+| **Sources** | Add/edit/delete sources (RSS · scrape · API · search), category hints, live enable toggle |
+| **Watchlist** | Manage entities & keywords that boost importance (+0.25) |
+
+"Run now" triggers a digest via `POST /api/runs`; full enrichment (summaries, scores) needs a Google AI Studio key on the API host. The frontend test suite runs fully offline (`cd frontend && npm test`) — `fetch` is mocked, no backend or quota needed.
+
 ## License
 
 Private.
