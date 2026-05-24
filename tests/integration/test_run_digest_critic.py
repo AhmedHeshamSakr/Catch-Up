@@ -51,6 +51,22 @@ def _fake_processor_high(items):
     ])
 
 
+def _fake_reprocessor_unfaithful(items, verdicts):
+    """Re-enrich attempt that still produces a (different) unfaithful summary.
+
+    Keeps the offline unfaithful path offline: with critic_max_reflections>0 the
+    guardrail would otherwise call the real LLM reprocessor.
+    """
+    return ProcessingResult(items=[
+        ItemEnrichment(
+            id=it.id, category=Category.AI_TECH, importance_score=0.9,
+            summary_en="A still-unfaithful re-summary.", summary_ar="ملخص.",
+            entities=[], sentiment="neutral",
+        )
+        for it in items
+    ])
+
+
 def test_unfaithful_item_is_flagged_excluded_from_render(tmp_path, monkeypatch):
     """HIGH item with faithful=False verdict → status==flagged, excluded from MD output, run.flagged==1."""
     settings = _settings(tmp_path)
@@ -78,6 +94,7 @@ def test_unfaithful_item_is_flagged_excluded_from_render(tmp_path, monkeypatch):
         processor=fake_processor,
         narrator=lambda items: "Today's digest.",
         critic=fake_critic,
+        reprocessor=_fake_reprocessor_unfaithful,
     )
 
     assert run.status in (RunStatus.SUCCESS, RunStatus.PARTIAL)
@@ -113,6 +130,7 @@ def test_faithful_verdict_item_untouched(tmp_path, monkeypatch):
         processor=_fake_processor_high,
         narrator=lambda items: "Digest.",
         critic=fake_critic,
+        reprocessor=_fake_reprocessor_unfaithful,
     )
 
     assert run.status == RunStatus.SUCCESS
@@ -213,3 +231,54 @@ def test_critic_raises_source_error_run_is_not_failed(tmp_path, monkeypatch):
     from app.adapters.storage.sqlite_backend import SqliteBackend
     items = SqliteBackend(settings.sqlite_path).get_items_for_run(run.run_id)
     assert items and items[0].status == "processed"
+
+
+def test_fixably_unfaithful_high_item_is_corrected_and_rendered(tmp_path, monkeypatch):
+    """G4a: a HIGH item flagged UNFAITHFUL is re-enriched with feedback, passes
+    re-critique, and is rendered (not withheld). Offline: injected critic+reprocessor."""
+    settings = _settings(tmp_path, critic_max_reflections=1)
+    monkeypatch.setattr(runner.rss, "collect",
+                        lambda s: [_raw("https://x.com/fix", "OpenAI launches new model")])
+
+    critic_calls = {"n": 0}
+
+    def fake_critic(items):
+        critic_calls["n"] += 1
+        # First critique: unfaithful. Re-critique (after reprocess): faithful.
+        faithful = critic_calls["n"] > 1
+        return [FaithfulnessVerdict(
+            item_id=items[0].id,
+            faithful=faithful,
+            issues=[] if faithful else ["hallucinated statistic"],
+        )]
+
+    def fake_reprocessor(items, verdicts):
+        return ProcessingResult(items=[
+            ItemEnrichment(
+                id=it.id, category=Category.AI_TECH, importance_score=0.9,
+                summary_en="A corrected faithful summary.", summary_ar="ملخص مصحح.",
+                entities=[], sentiment="neutral",
+            )
+            for it in items
+        ])
+
+    run = runner.run_digest(
+        settings=settings,
+        processor=_fake_processor_high,
+        narrator=lambda items: "Digest.",
+        critic=fake_critic,
+        reprocessor=fake_reprocessor,
+    )
+
+    assert run.status in (RunStatus.SUCCESS, RunStatus.PARTIAL)
+    assert run.flagged == 0  # corrected, not withheld
+
+    from app.adapters.storage.sqlite_backend import SqliteBackend
+    items = SqliteBackend(settings.sqlite_path).get_items_for_run(run.run_id)
+    assert items and items[0].status == "processed"
+    assert items[0].summary_en == "A corrected faithful summary."
+
+    # Corrected summary appears in rendered output; the original unfaithful one does not.
+    md = Path(run.outputs["md"]).read_text(encoding="utf-8")
+    assert "A corrected faithful summary." in md
+    assert "A detailed summary." not in md

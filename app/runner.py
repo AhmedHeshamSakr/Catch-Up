@@ -63,6 +63,10 @@ def _default_critic(settings: Settings):
     return lambda items: critic_module.adk_critique(items, settings)
 
 
+def _default_reprocessor(settings: Settings):
+    return lambda items, verdicts: processing.adk_reprocess(items, verdicts, settings)
+
+
 def select_rendered(items: list[NewsItem]) -> list[NewsItem]:
     """Select items to render: processed items, or all non-flagged if none processed."""
     return [i for i in items if i.status == "processed"] or [i for i in items if i.status != "flagged"]
@@ -84,6 +88,7 @@ def run_digest(
     processor=None,
     narrator=None,
     critic=None,
+    reprocessor=None,
 ) -> DigestRun:
     # Deferred: app.pipeline.agents imports this module at top level, so
     # importing it here at module scope would reintroduce a load-time cycle.
@@ -98,6 +103,7 @@ def run_digest(
         processor=processor,
         narrator=narrator,
         critic=critic,
+        reprocessor=reprocessor,
     )
     try:
         asyncio.run(_run_tree(tree, run_id))

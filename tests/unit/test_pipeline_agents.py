@@ -65,6 +65,19 @@ def _news(url: str, title: str, run_id: str = "r1") -> NewsItem:
     return NewsItem.from_raw(_raw(url, title), run_id=run_id)
 
 
+def _fake_reprocessor(items, verdicts):
+    """Offline re-enrichment: still-unfaithful re-summary (keeps the reflection
+    loop offline for guardrail tests that exercise the unfaithful path)."""
+    return ProcessingResult(items=[
+        ItemEnrichment(
+            id=it.id, category=Category.AI_TECH, importance_score=0.9,
+            summary_en="Re-summary.", summary_ar="ملخص.",
+            entities=[], sentiment="neutral",
+        )
+        for it in items
+    ])
+
+
 def _settings(tmp_path, **kwargs) -> Settings:
     cfg = tmp_path / "config"
     cfg.mkdir(exist_ok=True)
@@ -460,6 +473,7 @@ async def test_guardrail_critic_flags_unfaithful_item(tmp_path):
         settings=settings,
         storage=storage,
         critic=fake_critic,
+        reprocessor=_fake_reprocessor,
     )
     await _run(agent, state)
 
@@ -494,6 +508,7 @@ async def test_guardrail_critic_faithful_item_untouched(tmp_path):
         settings=settings,
         storage=storage,
         critic=fake_critic,
+        reprocessor=_fake_reprocessor,
     )
     await _run(agent, state)
 
@@ -528,6 +543,7 @@ async def test_guardrail_critic_raises_adds_stage_error(tmp_path):
         settings=settings,
         storage=storage,
         critic=boom_critic,
+        reprocessor=_fake_reprocessor,
     )
     events = await _run(agent, state)
 
@@ -565,6 +581,7 @@ async def test_guardrail_critic_disabled_skips_selection(tmp_path):
         settings=settings,
         storage=storage,
         critic=tracking_critic,
+        reprocessor=_fake_reprocessor,
     )
     await _run(agent, state)
 

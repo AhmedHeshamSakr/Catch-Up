@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     # Fail-closed: if the critic errors, protect (flag+redact) the items it was
     # meant to check rather than shipping them unguarded ("open").
     critic_fail_mode: Literal["open", "closed"] = "closed"
+    # Bounded self-correction: when the critic flags an item UNFAITHFUL, give the
+    # enricher up to this many chances to re-summarize with the critic's feedback
+    # before falling back to flag/redact. 0 disables reflection (legacy path).
+    critic_max_reflections: int = 1
     # API security. api_key=None leaves the API open (local/dev default).
     api_key: str | None = None
     # Token-bucket rate limit for POST /runs and POST /sources/resolve.

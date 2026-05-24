@@ -13,7 +13,7 @@ from app.core.domain import Importance, NewsItem
 from app.llm.parse import parse_model_json
 from app.llm.runtime import run_agent_text
 from app.pipeline.eval_schema import FaithfulnessVerdict, FaithfulnessVerdicts
-from app.pipeline.processing import score_to_importance
+from app.pipeline.processing import ReprocessFn, _apply_enrichment, score_to_importance
 from app.services.watchlist import Watchlist, watchlist_matched
 
 _PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
@@ -152,3 +152,91 @@ def apply_verdicts(
         "flagged": flagged_count,
         "verdicts": [v.model_dump() for v in verdicts],
     }
+
+
+def reflect_and_correct(
+    selected: list[NewsItem],
+    critic: CriticFn,
+    reprocessor: ReprocessFn,
+    watchlist: Watchlist,
+    settings: Settings,
+) -> dict:
+    """Bounded faithfulness reflection: detect → re-enrich-with-feedback → re-critique.
+
+    Critiques ``selected``; for items flagged UNFAITHFUL, while reflection budget
+    remains, re-enriches them with the critic's feedback in context, re-applies
+    the enrichment, and re-critiques ONLY those re-enriched items. Items that are
+    faithful after correction are kept (status processed, corrected summary).
+    Whatever remains unfaithful when the budget is exhausted is handled by
+    ``apply_verdicts`` (flag/downrank/redact per ``critic_action``).
+
+    Returns the same outcome dict shape as ``apply_verdicts`` (``flagged``,
+    ``verdicts``) plus a ``corrected`` count, so the run wiring is unchanged.
+
+    ``critic_max_reflections == 0`` reduces to the pre-batch path (a single
+    critique + ``apply_verdicts``), so no reprocessor call is made.
+    """
+    # latest_verdict tracks the most recent verdict per item id so the final
+    # apply_verdicts call reflects the post-reflection state.
+    latest_verdict: dict[str, FaithfulnessVerdict] = {}
+    for v in critic(selected):
+        latest_verdict[v.item_id] = v
+
+    items_by_id = {it.id: it for it in selected}
+    corrected = 0
+    budget = settings.critic_max_reflections
+
+    # Items still unfaithful after the most recent critique.
+    pending = [
+        items_by_id[v.item_id]
+        for v in latest_verdict.values()
+        if not v.faithful and v.item_id in items_by_id
+    ]
+
+    while budget > 0 and pending:
+        budget -= 1
+        feedback = [latest_verdict[it.id] for it in pending]
+        try:
+            result = reprocessor(pending, feedback)
+        except Exception:
+            # Re-enrichment failed: keep the existing (unfaithful) verdicts so
+            # the items fall through to flag/redact below. Stop reflecting.
+            break
+
+        enrichments = {e.id: e for e in result.items}
+        re_enriched: list[NewsItem] = []
+        for item in pending:
+            enrichment = enrichments.get(item.id)
+            if enrichment is None:
+                # No corrected enrichment returned — leave the unfaithful verdict
+                # in place so it is flagged/redacted below.
+                continue
+            _apply_enrichment(item, enrichment, watchlist, settings.importance_threshold)
+            re_enriched.append(item)
+
+        if not re_enriched:
+            break
+
+        # Re-critique ONLY the re-enriched items and refresh their verdicts.
+        new_verdicts = {v.item_id: v for v in critic(re_enriched)}
+        next_pending: list[NewsItem] = []
+        for item in re_enriched:
+            v = new_verdicts.get(item.id)
+            if v is None:
+                continue
+            latest_verdict[item.id] = v
+            if v.faithful:
+                corrected += 1
+            else:
+                next_pending.append(item)
+        pending = next_pending
+
+    final_verdicts = list(latest_verdict.values())
+    outcome = apply_verdicts(
+        selected,
+        final_verdicts,
+        settings.critic_action,
+        settings.importance_threshold,
+    )
+    outcome["corrected"] = corrected
+    return outcome

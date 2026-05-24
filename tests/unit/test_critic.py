@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 
-from app.core.domain import NewsItem, SourceType
+from app.core.config import Settings
+from app.core.domain import Category, NewsItem, SourceType
+from app.llm.schema import ItemEnrichment, ProcessingResult
 from app.pipeline.critic import (
     _CRITIC_PROMPT,
     WITHHELD_NOTICE,
@@ -11,8 +13,10 @@ from app.pipeline.critic import (
     apply_verdicts,
     build_critic_agent,
     redact_unfaithful,
+    reflect_and_correct,
 )
 from app.pipeline.eval_schema import FaithfulnessVerdict, FaithfulnessVerdicts
+from app.services.watchlist import Watchlist
 
 
 def _make_item(item_id: str, title: str, excerpt: str = "",
@@ -157,3 +161,122 @@ def test_faithfulness_verdicts_round_trip():
     assert restored.verdicts[1].faithful is False
     assert restored.verdicts[1].issues == ["hallucinated date"]
     assert restored.verdicts[1].suggested_summary_en == "A correct summary."
+
+
+# ---------------------------------------------------------------------------
+# reflect_and_correct — G4a bounded reflection loop. Fully offline.
+# ---------------------------------------------------------------------------
+
+_WL = Watchlist()
+
+
+def _enrichment(item_id: str, summary_en: str, score: float = 0.9) -> ItemEnrichment:
+    return ItemEnrichment(
+        id=item_id, category=Category.AI_TECH, importance_score=score,
+        summary_en=summary_en, summary_ar="ملخص.", entities=[], sentiment="neutral",
+    )
+
+
+def _make_high_item(item_id: str, summary_en: str = "Original summary.") -> NewsItem:
+    item = _make_item(item_id, "A title", excerpt="Source excerpt text.",
+                      summary_en=summary_en, summary_ar="ملخص.")
+    item.importance_score = 0.9
+    item.status = "processed"
+    return item
+
+
+def test_reflect_and_correct_fixes_unfaithful_after_one_reprocess():
+    """Item unfaithful then faithful after one reprocess → kept, corrected, not flagged."""
+    item = _make_high_item("c1")
+    settings = Settings(critic_max_reflections=1, critic_action="downrank",
+                        importance_threshold=0.33)
+
+    calls = {"critic": 0, "reprocess": 0}
+
+    def fake_critic(items):
+        calls["critic"] += 1
+        # First pass: unfaithful. Re-critique after correction: faithful.
+        faithful = calls["critic"] > 1
+        return [FaithfulnessVerdict(item_id=it.id, faithful=faithful,
+                                    issues=[] if faithful else ["hallucinated stat"])
+                for it in items]
+
+    def fake_reprocess(items, verdicts):
+        calls["reprocess"] += 1
+        return ProcessingResult(items=[_enrichment(it.id, "Corrected faithful summary.")
+                                       for it in items])
+
+    outcome = reflect_and_correct([item], fake_critic, fake_reprocess, _WL, settings)
+
+    assert calls["reprocess"] == 1
+    assert outcome["flagged"] == 0
+    assert outcome.get("corrected") == 1
+    assert item.status == "processed"
+    assert item.summary_en == "Corrected faithful summary."
+
+
+def test_reflect_and_correct_flags_when_still_unfaithful_after_budget():
+    """Item stays unfaithful after the budget → flagged + redacted."""
+    item = _make_high_item("c2")
+    settings = Settings(critic_max_reflections=1, critic_action="downrank",
+                        importance_threshold=0.33)
+
+    def always_unfaithful(items):
+        return [FaithfulnessVerdict(item_id=it.id, faithful=False, issues=["bad"])
+                for it in items]
+
+    def fake_reprocess(items, verdicts):
+        return ProcessingResult(items=[_enrichment(it.id, "Still wrong summary.")
+                                       for it in items])
+
+    outcome = reflect_and_correct([item], always_unfaithful, fake_reprocess, _WL, settings)
+
+    assert outcome["flagged"] == 1
+    assert item.status == "flagged"
+    assert item.summary_en == WITHHELD_NOTICE
+    assert item.summary_ar is None
+
+
+def test_reflect_and_correct_disabled_behaves_like_apply_verdicts():
+    """critic_max_reflections=0 → no reprocess call; legacy apply_verdicts behavior."""
+    item = _make_high_item("c3")
+    settings = Settings(critic_max_reflections=0, critic_action="downrank",
+                        importance_threshold=0.33)
+
+    reprocess_called = {"n": 0}
+
+    def fake_critic(items):
+        return [FaithfulnessVerdict(item_id=it.id, faithful=False, issues=["bad"])
+                for it in items]
+
+    def fake_reprocess(items, verdicts):
+        reprocess_called["n"] += 1
+        return ProcessingResult(items=[])
+
+    outcome = reflect_and_correct([item], fake_critic, fake_reprocess, _WL, settings)
+
+    assert reprocess_called["n"] == 0
+    assert outcome["flagged"] == 1
+    assert item.status == "flagged"
+    assert item.summary_en == WITHHELD_NOTICE
+
+
+def test_reflect_and_correct_reprocessor_raises_falls_back_to_flag():
+    """Reprocessor raising must not crash — fall back to flag + redact."""
+    item = _make_high_item("c4")
+    settings = Settings(critic_max_reflections=1, critic_action="downrank",
+                        importance_threshold=0.33)
+
+    def fake_critic(items):
+        return [FaithfulnessVerdict(item_id=it.id, faithful=False, issues=["bad"])
+                for it in items]
+
+    def boom_reprocess(items, verdicts):
+        raise RuntimeError("reprocess quota exhausted")
+
+    outcome = reflect_and_correct([item], fake_critic, boom_reprocess, _WL, settings)
+
+    assert outcome["flagged"] == 1
+    assert item.status == "flagged"
+    assert item.summary_en == WITHHELD_NOTICE
+    assert item.summary_ar is None

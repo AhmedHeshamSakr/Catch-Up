@@ -28,13 +28,19 @@ from pydantic import ConfigDict
 from app.core.config import Settings, load_sources
 from app.core.domain import DigestRun, Importance, NewsItem, RunStatus, SourceType
 from app.core.ports.storage import StorageBackend
-from app.pipeline.critic import apply_verdicts, redact_unfaithful, select_for_critique
+from app.pipeline.critic import (
+    apply_verdicts,
+    redact_unfaithful,
+    reflect_and_correct,
+    select_for_critique,
+)
 from app.pipeline.processing import process_items
 from app.runner import (
     _collect,
     _default_critic,
     _default_narrator,
     _default_processor,
+    _default_reprocessor,
     select_rendered,
 )
 from app.services import normalize as normalize_svc
@@ -244,6 +250,7 @@ class GuardrailCriticAgent(BaseAgent):
     settings: Settings
     storage: StorageBackend
     critic: Callable
+    reprocessor: Callable
 
     async def _run_async_impl(
         self, ctx: InvocationContext
@@ -256,13 +263,25 @@ class GuardrailCriticAgent(BaseAgent):
         selected = select_for_critique(items, watchlist, self.settings)
         try:
             if selected:
-                verdicts = self.critic(selected)
-                outcome = apply_verdicts(
-                    selected,
-                    verdicts,
-                    self.settings.critic_action,
-                    self.settings.importance_threshold,
-                )
+                if self.settings.critic_max_reflections > 0:
+                    # Bounded self-correction: re-enrich critic-flagged items with
+                    # feedback before withholding (falls back to apply_verdicts).
+                    outcome = reflect_and_correct(
+                        selected,
+                        self.critic,
+                        self.reprocessor,
+                        watchlist,
+                        self.settings,
+                    )
+                else:
+                    # Reflection disabled → exactly the pre-batch path.
+                    verdicts = self.critic(selected)
+                    outcome = apply_verdicts(
+                        selected,
+                        verdicts,
+                        self.settings.critic_action,
+                        self.settings.importance_threshold,
+                    )
                 run.flagged = outcome["flagged"]
                 run.critic_verdicts = outcome["verdicts"]
         except Exception as exc:
@@ -363,6 +382,7 @@ def build_pipeline(
     processor: Callable | None = None,
     narrator: Callable | None = None,
     critic: Callable | None = None,
+    reprocessor: Callable | None = None,
 ) -> SequentialAgent:
     """Build and return the full NewsCatchUpPipeline SequentialAgent.
 
@@ -378,6 +398,7 @@ def build_pipeline(
     _processor = processor or _default_processor(settings)
     _narrator = narrator or _default_narrator(settings)
     _critic = critic or _default_critic(settings)
+    _reprocessor = reprocessor or _default_reprocessor(settings)
 
     collect_sources = ParallelAgent(
         name="CollectSources",
@@ -450,6 +471,7 @@ def build_pipeline(
                 settings=settings,
                 storage=storage,
                 critic=_critic,
+                reprocessor=_reprocessor,
             ),
             DigestEditorAgent(
                 name="DigestEditor",
