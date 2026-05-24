@@ -38,6 +38,17 @@ def _esc(value: str | None) -> str:
     return html.escape(value or "")
 
 
+def _safe_href(url: str | None) -> str:
+    """Allow only http(s) links as live hrefs; collapse anything else to '#'.
+
+    Guards against javascript:/data:/etc. scheme injection in rendered output.
+    """
+    value = (url or "").strip()
+    if value.lower().startswith(("http://", "https://")):
+        return value
+    return "#"
+
+
 def _card(item: NewsItem) -> str:
     badge = ""
     if item.importance and item.importance in _BADGE:
@@ -45,7 +56,7 @@ def _card(item: NewsItem) -> str:
         badge = f'<span class="badge" style="color:{fg};background:{bg}">{label}</span>'
     summary = f'<div class="sum">{_esc(item.summary_en)}</div>' if item.summary_en else ""
     return (
-        f'<div class="card"><a href="{_esc(item.url)}">{_esc(item.title)}</a>'
+        f'<div class="card"><a href="{_esc(_safe_href(item.url))}">{_esc(item.title)}</a>'
         f'<div class="row">{badge}<span class="src">{_esc(item.source_name)}</span></div>'
         f"{summary}</div>"
     )

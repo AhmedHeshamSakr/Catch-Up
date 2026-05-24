@@ -188,6 +188,30 @@ def test_resolve_rss_returns_none_yields_422(tmp_path):
     assert r.status_code == 422
 
 
+def test_resolve_rejects_non_http_scheme(resolve_client):
+    for bad in ("file:///etc/passwd", "javascript:alert(1)"):
+        r = resolve_client.post(
+            "/api/sources/resolve",
+            json={"type": "rss", "url": bad},
+        )
+        assert r.status_code == 422, bad
+
+
+def test_put_sources_rejects_non_http_url(client):
+    payload = [{"id": "x", "type": "rss", "name": "X", "url": "file:///etc/passwd",
+                "category_hint": "ai_tech", "enabled": True}]
+    assert client.put("/api/sources", json=payload).status_code == 422
+    payload2 = [{"id": "y", "type": "rss", "name": "Y", "url": "javascript:alert(1)",
+                 "category_hint": "ai_tech", "enabled": True}]
+    assert client.put("/api/sources", json=payload2).status_code == 422
+
+
+def test_put_sources_allows_none_url(client):
+    # Sources without a url (e.g. api/query sources) must still be accepted.
+    payload = [{"id": "q", "type": "api", "name": "Q", "query": "ai", "enabled": True}]
+    assert client.put("/api/sources", json=payload).status_code == 200
+
+
 def test_resolve_unsupported_type_yields_400(resolve_client):
     r = resolve_client.post(
         "/api/sources/resolve",
@@ -196,8 +220,8 @@ def test_resolve_unsupported_type_yields_400(resolve_client):
     assert r.status_code == 400
 
 
-def test_resolve_exception_mapped_to_422(tmp_path):
-    """Exceptions from the resolver function are mapped to 422 (not 500)."""
+def test_resolve_exception_returns_generic_message(tmp_path):
+    """Resolver exceptions map to a 4xx with a GENERIC message (no internals leaked)."""
     cfg = tmp_path / "config"
     cfg.mkdir()
     (cfg / "sources.yaml").write_text("sources: []\n", encoding="utf-8")
@@ -209,7 +233,7 @@ def test_resolve_exception_mapped_to_422(tmp_path):
     )
 
     def boom(u):
-        raise ValueError("SSRF: private address")
+        raise ValueError("SSRF: private address 192.168.1.1")
 
     app = create_app(
         settings,
@@ -218,10 +242,133 @@ def test_resolve_exception_mapped_to_422(tmp_path):
         discover_feed_fn=boom,
     )
     c = TestClient(app, raise_server_exceptions=False)
-    r = c.post("/api/sources/resolve", json={"type": "youtube", "url": "http://192.168.1.1/"})
-    assert r.status_code == 422
-    assert "SSRF" in r.json()["detail"]
+    r = c.post("/api/sources/resolve", json={"type": "youtube", "url": "http://example.com/"})
+    assert r.status_code == 400
+    detail = r.json()["detail"]
+    assert "SSRF" not in detail  # internal exception text must NOT leak
+    assert "192.168" not in detail
+    assert detail == "could not resolve source"
 
-    r2 = c.post("/api/sources/resolve", json={"type": "rss", "url": "http://192.168.1.1/"})
-    assert r2.status_code == 422
-    assert "SSRF" in r2.json()["detail"]
+    r2 = c.post("/api/sources/resolve", json={"type": "rss", "url": "http://example.com/"})
+    assert r2.status_code == 400
+    detail2 = r2.json()["detail"]
+    assert "SSRF" not in detail2
+    assert detail2 == "could not resolve source"
+
+
+# ---------------------------------------------------------------------------
+# API-key auth (optional; open when settings.api_key is unset)
+# ---------------------------------------------------------------------------
+
+
+def _auth_client(tmp_path, api_key):
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "sources.yaml").write_text("sources: []\n", encoding="utf-8")
+    (cfg / "watchlist.yaml").write_text("entities: []\nkeywords: []\n", encoding="utf-8")
+    settings = Settings(
+        sqlite_path=str(tmp_path / "db.sqlite"),
+        config_dir=str(cfg),
+        output_dir=str(tmp_path / "out"),
+        api_key=api_key,
+    )
+    app = create_app(
+        settings,
+        run_digest_fn=lambda **kw: None,
+        resolve_channel_id_fn=lambda u: "UCxyz",
+        discover_feed_fn=lambda u: "https://p.com/feed.xml",
+    )
+    return TestClient(app)
+
+
+def test_mutating_routes_require_api_key_when_set(tmp_path):
+    c = _auth_client(tmp_path, api_key="secret")
+    src = [{"id": "x", "type": "rss", "name": "X", "url": "https://x/feed", "enabled": True}]
+
+    # No header -> 401
+    assert c.put("/api/sources", json=src).status_code == 401
+    assert c.put("/api/watchlist", json={"entities": [], "keywords": []}).status_code == 401
+    assert c.post("/api/runs").status_code == 401
+    assert c.post("/api/sources/resolve",
+                  json={"type": "youtube", "url": "https://youtube.com/@x"}).status_code == 401
+
+    # X-API-Key header -> allowed
+    h = {"X-API-Key": "secret"}
+    assert c.put("/api/sources", json=src, headers=h).status_code == 200
+    assert c.put("/api/watchlist", json={"entities": [], "keywords": []}, headers=h).status_code == 200
+    assert c.post("/api/runs", headers=h).status_code == 202
+    assert c.post("/api/sources/resolve",
+                  json={"type": "youtube", "url": "https://youtube.com/@x"},
+                  headers=h).status_code == 200
+
+    # Authorization: Bearer header -> allowed
+    hb = {"Authorization": "Bearer secret"}
+    assert c.post("/api/runs", headers=hb).status_code == 202
+
+    # Wrong key -> 401
+    assert c.post("/api/runs", headers={"X-API-Key": "nope"}).status_code == 401
+
+
+def test_get_routes_open_even_with_api_key(tmp_path):
+    c = _auth_client(tmp_path, api_key="secret")
+    assert c.get("/api/health").status_code == 200
+    assert c.get("/api/sources").status_code == 200
+    assert c.get("/api/watchlist").status_code == 200
+
+
+def test_auth_default_open_when_unset(tmp_path):
+    c = _auth_client(tmp_path, api_key=None)
+    src = [{"id": "x", "type": "rss", "name": "X", "url": "https://x/feed", "enabled": True}]
+    assert c.put("/api/sources", json=src).status_code == 200
+    assert c.post("/api/runs").status_code == 202
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting on /runs and /resolve
+# ---------------------------------------------------------------------------
+
+
+def test_runs_rate_limited(tmp_path):
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "sources.yaml").write_text("sources: []\n", encoding="utf-8")
+    (cfg / "watchlist.yaml").write_text("entities: []\nkeywords: []\n", encoding="utf-8")
+    settings = Settings(
+        sqlite_path=str(tmp_path / "db.sqlite"),
+        config_dir=str(cfg),
+        output_dir=str(tmp_path / "out"),
+        rate_limit_burst=1,
+        rate_limit_refill_per_sec=0.0,
+    )
+    app = create_app(settings, run_digest_fn=lambda **kw: None)
+    c = TestClient(app)
+    assert c.post("/api/runs").status_code == 202
+    r = c.post("/api/runs")
+    assert r.status_code == 429
+    assert r.json()["detail"] == "rate limit exceeded"
+
+
+def test_resolve_rate_limited(tmp_path):
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "sources.yaml").write_text("sources: []\n", encoding="utf-8")
+    (cfg / "watchlist.yaml").write_text("entities: []\nkeywords: []\n", encoding="utf-8")
+    settings = Settings(
+        sqlite_path=str(tmp_path / "db.sqlite"),
+        config_dir=str(cfg),
+        output_dir=str(tmp_path / "out"),
+        rate_limit_burst=1,
+        rate_limit_refill_per_sec=0.0,
+    )
+    app = create_app(
+        settings,
+        run_digest_fn=lambda **kw: None,
+        resolve_channel_id_fn=lambda u: "UCxyz",
+        discover_feed_fn=lambda u: "https://p.com/feed.xml",
+    )
+    c = TestClient(app)
+    body = {"type": "youtube", "url": "https://youtube.com/@x"}
+    assert c.post("/api/sources/resolve", json=body).status_code == 200
+    r = c.post("/api/sources/resolve", json=body)
+    assert r.status_code == 429
+    assert r.json()["detail"] == "rate limit exceeded"

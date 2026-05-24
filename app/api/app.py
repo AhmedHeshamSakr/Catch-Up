@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
-from fastapi import APIRouter, BackgroundTasks, FastAPI, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.schemas import DashboardOut, ResolveIn, ResolveOut, RunDetail
@@ -10,7 +11,40 @@ from app.core.config import Settings, SourceConfig, load_sources
 from app.core.domain import Category, Importance
 from app.runner import build_storage, run_digest
 from app.services import config_store, feed_discovery, youtube_resolve
+from app.services.ratelimit import TokenBucket
 from app.services.watchlist import Watchlist, load_watchlist
+
+logger = logging.getLogger(__name__)
+
+
+def _require_api_key(settings: Settings):
+    """Dependency factory: enforce an API key on mutating routes when configured.
+
+    Open (no-op) when ``settings.api_key`` is unset, preserving local/dev behavior.
+    Accepts either ``X-API-Key: <key>`` or ``Authorization: Bearer <key>``.
+    """
+
+    def dep(
+        authorization: str | None = Header(None),
+        x_api_key: str | None = Header(None),
+    ) -> None:
+        if not settings.api_key:
+            return  # open when unset (local/dev)
+        supplied = x_api_key or (authorization or "").removeprefix("Bearer ").strip()
+        if supplied != settings.api_key:
+            raise HTTPException(status_code=401, detail="invalid or missing API key")
+
+    return dep
+
+
+def _rate_limiter(bucket: TokenBucket):
+    """Dependency factory: enforce a shared per-process token bucket."""
+
+    def dep() -> None:
+        if not bucket.try_acquire():
+            raise HTTPException(status_code=429, detail="rate limit exceeded")
+
+    return dep
 
 
 def create_app(
@@ -29,6 +63,14 @@ def create_app(
         allow_headers=["*"],
     )
     api = APIRouter(prefix="/api")
+
+    # Shared, per-process limiter for the expensive endpoints (/runs, /resolve).
+    rate_bucket = TokenBucket(
+        rate_per_sec=settings.rate_limit_refill_per_sec,
+        capacity=settings.rate_limit_burst,
+    )
+    require_api_key = Depends(_require_api_key(settings))
+    rate_limit = Depends(_rate_limiter(rate_bucket))
 
     def storage():
         return build_storage(settings)
@@ -74,7 +116,7 @@ def create_app(
     def get_sources():
         return load_sources(settings.config_dir)
 
-    @api.put("/sources")
+    @api.put("/sources", dependencies=[require_api_key])
     def put_sources(sources: list[SourceConfig]):
         config_store.write_sources(settings.config_dir, sources)
         return {"status": "ok", "count": len(sources)}
@@ -83,17 +125,18 @@ def create_app(
     def get_watchlist() -> Watchlist:
         return load_watchlist(settings.config_dir)
 
-    @api.put("/watchlist")
+    @api.put("/watchlist", dependencies=[require_api_key])
     def put_watchlist(watchlist: Watchlist):
         config_store.write_watchlist(settings.config_dir, watchlist)
         return {"status": "ok"}
 
-    @api.post("/runs", status_code=202)
+    @api.post("/runs", status_code=202, dependencies=[require_api_key, rate_limit])
     def trigger_run(background: BackgroundTasks):
         background.add_task(run_digest_fn, settings=settings)
         return {"status": "started"}
 
-    @api.post("/sources/resolve", response_model=ResolveOut)
+    @api.post("/sources/resolve", response_model=ResolveOut,
+              dependencies=[require_api_key, rate_limit])
     def resolve_source(body: ResolveIn) -> ResolveOut:
         if body.type == "youtube":
             try:
@@ -101,7 +144,10 @@ def create_app(
             except HTTPException:
                 raise
             except Exception as exc:
-                raise HTTPException(status_code=422, detail=str(exc)) from exc
+                # Log the real cause server-side; return a generic message so we
+                # don't leak internals (e.g. SSRF target addresses) to clients.
+                logger.warning("youtube resolve failed for %r: %s", body.url, exc)
+                raise HTTPException(status_code=400, detail="could not resolve source") from exc
             if not cid:
                 raise HTTPException(status_code=422, detail="Could not resolve a YouTube channel from that link")
             return ResolveOut(channel_id=cid)
@@ -111,7 +157,8 @@ def create_app(
             except HTTPException:
                 raise
             except Exception as exc:
-                raise HTTPException(status_code=422, detail=str(exc)) from exc
+                logger.warning("rss discover failed for %r: %s", body.url, exc)
+                raise HTTPException(status_code=400, detail="could not resolve source") from exc
             if not feed:
                 raise HTTPException(status_code=422, detail="No RSS feed found at that URL")
             return ResolveOut(url=feed)
