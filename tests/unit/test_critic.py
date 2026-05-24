@@ -4,7 +4,14 @@ from __future__ import annotations
 import json
 
 from app.core.domain import NewsItem, SourceType
-from app.pipeline.critic import _CRITIC_PROMPT, _critic_payload, build_critic_agent
+from app.pipeline.critic import (
+    _CRITIC_PROMPT,
+    WITHHELD_NOTICE,
+    _critic_payload,
+    apply_verdicts,
+    build_critic_agent,
+    redact_unfaithful,
+)
 from app.pipeline.eval_schema import FaithfulnessVerdict, FaithfulnessVerdicts
 
 
@@ -70,6 +77,68 @@ def test_critic_payload_multiple_items():
     records = json.loads(payload)
     assert len(records) == 3
     assert [r["id"] for r in records] == ["id-0", "id-1", "id-2"]
+
+
+def test_redact_unfaithful_helper_clears_summaries():
+    item = _make_item("rid", "T", summary_en="Hallucinated.", summary_ar="مهلوس.")
+    redact_unfaithful(item)
+    assert item.summary_en == WITHHELD_NOTICE
+    assert item.summary_ar is None
+
+
+def test_apply_verdicts_redacts_unfaithful_under_default_action():
+    """An unfaithful item under flag/downrank has its summary text redacted."""
+    item = _make_item("u1", "T", summary_en="A hallucinated summary.",
+                      summary_ar="ملخص مهلوس.")
+    item.importance_score = 0.9
+    verdicts = [FaithfulnessVerdict(item_id="u1", faithful=False,
+                                    issues=["hallucinated"])]
+    apply_verdicts([item], verdicts, "downrank", 0.33)
+    assert item.status == "flagged"
+    assert item.summary_en == WITHHELD_NOTICE
+    assert item.summary_ar is None
+
+
+def test_apply_verdicts_flag_redacts_unfaithful():
+    item = _make_item("u2", "T", summary_en="Bad summary.", summary_ar="سيئ.")
+    verdicts = [FaithfulnessVerdict(item_id="u2", faithful=False, issues=["x"])]
+    apply_verdicts([item], verdicts, "flag", 0.33)
+    assert item.status == "flagged"
+    assert item.summary_en == WITHHELD_NOTICE
+    assert item.summary_ar is None
+
+
+def test_apply_verdicts_replace_with_suggestion_not_redacted():
+    """A replace with a suggested faithful summary keeps the suggestion, not redacted."""
+    item = _make_item("r1", "T", summary_en="Original.", summary_ar="أصلي.")
+    item.status = "processed"
+    verdicts = [FaithfulnessVerdict(item_id="r1", faithful=False, issues=["x"],
+                                    suggested_summary_en="A corrected faithful summary.")]
+    apply_verdicts([item], verdicts, "replace", 0.33)
+    assert item.summary_en == "A corrected faithful summary."
+    assert item.summary_ar == "أصلي."
+    assert item.status == "processed"
+
+
+def test_apply_verdicts_replace_without_suggestion_redacts():
+    """Replace fallback (no suggestion) downranks AND redacts."""
+    item = _make_item("r2", "T", summary_en="Original.", summary_ar="أصلي.")
+    item.importance_score = 0.9
+    verdicts = [FaithfulnessVerdict(item_id="r2", faithful=False, issues=["x"],
+                                    suggested_summary_en=None)]
+    apply_verdicts([item], verdicts, "replace", 0.33)
+    assert item.status == "flagged"
+    assert item.summary_en == WITHHELD_NOTICE
+    assert item.summary_ar is None
+
+
+def test_apply_verdicts_faithful_item_untouched():
+    item = _make_item("f1", "T", summary_en="Good summary.", summary_ar="جيد.")
+    verdicts = [FaithfulnessVerdict(item_id="f1", faithful=True, issues=[])]
+    apply_verdicts([item], verdicts, "downrank", 0.33)
+    assert item.status == "raw"
+    assert item.summary_en == "Good summary."
+    assert item.summary_ar == "جيد."
 
 
 def test_faithfulness_verdicts_round_trip():

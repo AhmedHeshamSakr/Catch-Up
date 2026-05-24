@@ -22,6 +22,11 @@ _CRITIC_PROMPT = (
 
 CriticFn = Callable[[list[NewsItem]], list[FaithfulnessVerdict]]
 
+# Placeholder substituted for the summary text of items that fail the
+# faithfulness check, so unfaithful (possibly hallucinated) text is never
+# persisted or served.
+WITHHELD_NOTICE = "[Summary withheld: failed faithfulness check]"
+
 # Importance ordering for >= comparisons: LOW < MEDIUM < HIGH
 _IMPORTANCE_ORDER: dict[Importance, int] = {
     Importance.LOW: 0,
@@ -88,6 +93,17 @@ def select_for_critique(
     return selected
 
 
+def redact_unfaithful(item: NewsItem) -> None:
+    """Replace an item's summary text after it fails the faithfulness check.
+
+    The English summary becomes a withheld notice and the Arabic summary is
+    cleared, so unfaithful (possibly hallucinated) text is never persisted or
+    served downstream.
+    """
+    item.summary_en = WITHHELD_NOTICE
+    item.summary_ar = None
+
+
 def apply_verdicts(
     items: list[NewsItem],
     verdicts: list[FaithfulnessVerdict],
@@ -106,23 +122,27 @@ def apply_verdicts(
         # Item is UNFAITHFUL
         if action == "flag":
             item.status = "flagged"
+            redact_unfaithful(item)
             flagged_count += 1
 
         elif action == "downrank":
             item.status = "flagged"
             item.importance_score = min(item.importance_score or 0.0, threshold - 0.01)
             item.importance = score_to_importance(item.importance_score)
+            redact_unfaithful(item)
             flagged_count += 1
 
         elif action == "replace":
             if verdict.suggested_summary_en:
+                # The suggestion is the corrected, faithful text — keep it and
+                # do NOT redact or downrank (status stays processed).
                 item.summary_en = verdict.suggested_summary_en
-                # Keep status as-is (processed), do NOT downrank
             else:
-                # Fall back to downrank behavior
+                # Fall back to downrank behavior (and redact the unfaithful text)
                 item.status = "flagged"
                 item.importance_score = min(item.importance_score or 0.0, threshold - 0.01)
                 item.importance = score_to_importance(item.importance_score)
+                redact_unfaithful(item)
                 flagged_count += 1
 
     return {

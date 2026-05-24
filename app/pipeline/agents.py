@@ -28,7 +28,7 @@ from pydantic import ConfigDict
 from app.core.config import Settings, load_sources
 from app.core.domain import DigestRun, Importance, NewsItem, RunStatus, SourceType
 from app.core.ports.storage import StorageBackend
-from app.pipeline.critic import apply_verdicts, select_for_critique
+from app.pipeline.critic import apply_verdicts, redact_unfaithful, select_for_critique
 from app.pipeline.processing import process_items
 from app.runner import (
     _collect,
@@ -244,8 +244,8 @@ class GuardrailCriticAgent(BaseAgent):
         items: list[NewsItem] = state.get("items") or []
         watchlist = state["watchlist"]
 
+        selected = select_for_critique(items, watchlist, self.settings)
         try:
-            selected = select_for_critique(items, watchlist, self.settings)
             if selected:
                 verdicts = self.critic(selected)
                 outcome = apply_verdicts(
@@ -258,8 +258,15 @@ class GuardrailCriticAgent(BaseAgent):
                 run.critic_verdicts = outcome["verdicts"]
         except Exception as exc:
             run.source_errors.append(
-                {"stage": "critic", "error": str(exc), "ts": _now()}
+                {"stage": "critic", "error": str(exc), "ts": _now(), "degraded": True}
             )
+            # Fail-closed: the critic could not verify the selected (HIGH /
+            # watchlisted) items, so protect them rather than ship unguarded.
+            if self.settings.critic_fail_mode == "closed":
+                for item in selected:
+                    item.status = "flagged"
+                    redact_unfaithful(item)
+                run.flagged = len(selected)
 
         yield _make_event(ctx, self.name)
 

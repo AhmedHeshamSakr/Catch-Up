@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     critic_min_importance: Importance = Importance.HIGH
     critic_check_watchlisted: bool = True
     critic_action: Literal["flag", "downrank", "replace"] = "downrank"
+    # Fail-closed: if the critic errors, protect (flag+redact) the items it was
+    # meant to check rather than shipping them unguarded ("open").
+    critic_fail_mode: Literal["open", "closed"] = "closed"
     # API security. api_key=None leaves the API open (local/dev default).
     api_key: str | None = None
     # Token-bucket rate limit for POST /runs and POST /sources/resolve.

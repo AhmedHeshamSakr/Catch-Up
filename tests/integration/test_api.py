@@ -76,6 +76,46 @@ def test_dashboard_news_runs(tmp_path):
     assert len(high) == 1 and high[0]["title"] == "AI item"
 
 
+def test_api_omits_flagged_items(tmp_path):
+    """GET /api/runs/{id} and GET /api/news must not serve flagged items."""
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "sources.yaml").write_text("sources: []\n", encoding="utf-8")
+    (cfg / "watchlist.yaml").write_text("entities: []\nkeywords: []\n", encoding="utf-8")
+    settings = Settings(sqlite_path=str(tmp_path / "db.sqlite"),
+                        config_dir=str(cfg), output_dir=str(tmp_path / "out"))
+
+    st = SqliteBackend(settings.sqlite_path)
+    st.init_schema()
+    run = DigestRun(run_id="r1")
+    st.create_run(run)
+
+    def mk(url, status):
+        raw = RawItem(source_id="s", source_type=SourceType.RSS, source_name="S",
+                      url=url, title="t")
+        it = NewsItem.from_raw(raw, run_id="r1")
+        it.category = Category.AI_TECH
+        it.importance = Importance.HIGH
+        it.status = status
+        return it
+
+    st.save_items([mk("https://a/ok", "processed"), mk("https://a/bad", "flagged")])
+
+    app = create_app(settings, run_digest_fn=lambda **kw: None)
+    c = TestClient(app)
+
+    detail = c.get("/api/runs/r1").json()
+    assert [i["url"] for i in detail["items"]] == ["https://a/ok"]
+
+    news = c.get("/api/news").json()
+    assert [i["url"] for i in news] == ["https://a/ok"]
+
+    # Dashboard category counts must also exclude the flagged item.
+    d = c.get("/api/dashboard").json()
+    assert d["total_items"] == 1
+    assert d["category_counts"]["ai_tech"] == 1
+
+
 def test_news_runs_limit_over_cap_returns_422(client):
     # limit above the 200 cap is rejected by FastAPI Query validation.
     assert client.get("/api/news", params={"limit": 9999}).status_code == 422
