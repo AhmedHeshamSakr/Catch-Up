@@ -93,13 +93,8 @@ export default function DigestsPage() {
                     onClick={() => router.push(`/digests/${run.run_id}`)}
                     className="group cursor-pointer hover:bg-muted/40"
                   >
-                    <TableCell className="pl-4">
-                      <Link
-                        href={`/digests/${run.run_id}`}
-                        className="font-mono tabular-nums text-xs text-foreground hover:text-cyan transition-colors"
-                      >
-                        {formatDateTime(run.started_at)}
-                      </Link>
+                    <TableCell className="pl-4 font-mono tabular-nums text-xs text-foreground group-hover:text-cyan transition-colors">
+                      {formatDateTime(run.started_at)}
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={run.status} />
@@ -123,6 +118,7 @@ export default function DigestsPage() {
                       <Link
                         href={`/digests/${run.run_id}`}
                         aria-label={`View run started ${formatDateTime(run.started_at)}`}
+                        onClick={(e) => e.stopPropagation()}
                         className="flex items-center justify-center text-muted-foreground/40 group-hover:text-muted-foreground transition-colors"
                       >
                         <ChevronRight className="size-4" />
