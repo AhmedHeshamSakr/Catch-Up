@@ -144,7 +144,22 @@ Executed subagent-driven on `feat/console` (fresh implementer per task + a revie
 - **T7 — Polish + docs** (`240dff9`, this commit): full-row click nav on the digests table (keyboard links preserved); emoji/`dangerouslySetInnerHTML` sweep clean; README "Web Console" section; this log.
 - **Result:** `cd frontend && npm test` → **39 passed (5 files)**; `npx tsc --noEmit`, `npm run lint`, `npm run build` all clean (7 routes). Every commit authored solely by AhmedHeshamSakr.
 
+### Phase: Plan 6 merged + live smoke
+- **PR #6 merged → `main`.** Ran a live stack smoke (`app.cli serve` + curl). Findings: API + all 6 console endpoints return valid JSON (confirmed via `node JSON.parse`); a real digest collected **80 RSS items**, run finalized `partial` (graceful degradation worked). Surfaced two issues that motivated Plan 7's scope: (a) **`GOOGLE_API_KEY` lives in `app/.env`** but `serve` (from repo root) read only `./.env` → "No API key"; (b) the deprecated sync `runner.run` runs the LLM in a worker thread, so its error escaped as a noisy unhandled traceback (run still degraded correctly, just ugly).
+
+### Phase: Plan 7 — Search grounding + run_async (research + planning)
+- Branched `feat/search-grounding`. Researched ADK `google_search` grounding offline (no quota) → `docs/superpowers/research/2026-05-24-plan7-search-grounding.md`. Key facts: `from google.adk.tools import google_search`; **`google_search` cannot coexist with `output_schema`** (search-only agent); cited sources at `event.grounding_metadata.grounding_chunks[*].web.{uri,title,domain}` (uri is a Vertex redirect URL; metadata may be on a non-final event → keep last non-None); `run_async` propagates exceptions cleanly; fully offline-testable via synthetic `GroundingMetadata` Pydantic objects. Wrote **Plan 7** → `docs/superpowers/plans/2026-05-24-plan7-search-grounding.md`.
+
+### Phase: Execution — Plan 7 (Search grounding + run_async) ✅
+Executed subagent-driven on `feat/search-grounding`. Fully offline (model boundary injected); only a final live grounding spike defers until the Gemini quota resets.
+- **T1 — Key loading + ADK runtime** (`bdc93c1`): `Settings.env_file=("app/.env",".env")` (root `.env` wins when both set the key; merges so `app/.env` loads when `./.env` lacks it); new `app/pipeline/adk_runtime.py` — `ensure_api_key()` (sets `os.environ` for ADK's google client), async `_run_text_async`, sync bridge `run_agent_text()` via `asyncio.run`. Confirmed `create_session` is the async API in ADK 1.34.x.
+- **T2 — run_async migration** (`2122cc3`): `adk_enrich`/`adk_narrate` now call `run_agent_text` (kills the sync-runner deprecation + worker-thread exception escape); dropped unused `InMemoryRunner`/`types` imports. 65 tests stay green (existing tests inject `EnrichFn`/`NarrateFn` fakes).
+- **T3 — `parse_grounding`** (`1cc77a7`): pure harvester in `app/services/search.py` — `grounding_chunks[*].web` → `RawItem` (url=uri, title=title||domain||uri, `published_at=None`, dedup by uri, defensive getattr). 5 offline tests with synthetic `GroundingMetadata`.
+- **T4 — Collector + wiring** (`145a968`): `build_search_agent` (`tools=[google_search]`, NO `output_schema`), `adk_ground` (run_async, keeps last non-None grounding_metadata), `collect(..., ground=adk_ground)` injectable boundary; wired `SourceType.SEARCH` into `runner._collect` (removed the stale "Plan 5" comment); added a **disabled** `search-ai-breakthroughs` source to `config/sources.yaml`. 2 injected-ground tests.
+- **Result:** `uv run pytest tests -q` → **72 passed**; `uv run --extra lint ruff check app tests` clean. Every commit authored solely by AhmedHeshamSakr.
+- **Deferred (needs Gemini quota):** live grounding spike — confirm which stream event carries `grounding_metadata`, redirect-URL resolvability, `web.domain` null on the Gemini API backend; then flip the search source `enabled: true`.
+
 ### Next
-- **PR #6** (`feat/console` → `main`) — open for review/merge.
-- After merge → **Plan 7 — Google Search grounding collector + migrate ADK sync `runner.run` → `run_async`** (deferred until the Gemini AI Studio free-tier quota resets). Then Plan 8 orchestration (full ADK SequentialAgent tree) · Plan 9 GCP prod (Firestore / Cloud Run / Cloud Scheduler / Vertex).
-- Console screens deferred to later plans (need new API endpoints): Categories, Pipeline (agent-tree config), Runs & Schedule, Settings (provider/keys).
+- **PR #7** (`feat/search-grounding` → `main`) — open for review/merge.
+- Then **Plan 8 — orchestration** (full ADK `SequentialAgent` tree wiring `root_agent`) · **Plan 9 — GCP prod** (Firestore / Cloud Run / Cloud Scheduler / Vertex / observability / auth).
+- Deferred earlier: console screens needing new API endpoints (Categories, Pipeline, Runs & Schedule, Settings); the Plan 7 live grounding spike.
