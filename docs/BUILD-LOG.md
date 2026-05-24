@@ -184,7 +184,18 @@ Executed subagent-driven on `feat/quality-safety-net` (stacked on PR #8). Plan: 
   - **L2 — Console** (`78c5c64`): `api.resolveSource(type,url)`; a "paste a link" row + **Resolve** button in the Sources form (youtube/rss) that auto-fills `channel_id`/`url` (+name), with toasts. 43 frontend tests.
   - **Result:** backend **166 passed**, frontend **43 passed**; ruff/tsc/lint/build clean. Commits authored AhmedHeshamSakr.
 
+### Phase: Stacked-merge fixup
+- PRs #9/#10 were stacked with non-main bases and their head branches weren't deleted on merge, so they merged into intermediate branches — `main` had only #8. **PR #11** brought #9+#10 onto `main` (clean linear FF from `feat/source-resolve`). Lesson: delete the head branch on each stacked-PR merge so GitHub auto-retargets the next PR to `main`.
+
+### Phase: Execution — Plan 8 (ADK agent-tree orchestration) ✅
+Goal (Ahmed): **everything must be ADK**. Branched `feat/orchestration` off the now-complete `main`. **Approach = Option B** (the tree IS the orchestration; `run_digest` runs it) so the CLI/API run *through* ADK. Plan: `docs/superpowers/plans/2026-05-24-plan8-orchestration.md`.
+- **O1 — Tree wrappers** (`f3bd9fc`): `app/pipeline/agents.py` — 7 `BaseAgent` wrappers (PipelineInit, 5×SourceCollector, NormalizeDedup, Processing, Guardrail, DigestEditor, Render) each wrapping the existing proven function + sharing `ctx.session.state`; `build_pipeline()` → `SequentialAgent("NewsCatchUpPipeline")` with a `ParallelAgent("CollectSources")` (distinct `raws_*` keys, parallel-safe); extracted `select_rendered`; `pytest asyncio_mode=auto`. 27 wrapper tests. Review fix: `PipelineInitAgent` run_id fallback bug.
+- **O2 — run_digest runs the tree** (`253bbb8`): `run_digest` builds the tree and executes it via `InMemoryRunner.run_async` (bridged by `asyncio.run`), seeding `run_id` into session state and reading the finalized `DigestRun` back from storage; unexpected errors (e.g. render) → FAILED+finalize+re-raise in the delegator. **Retired the dead weather `root_agent`** → `app/agent.py` now `App(root_agent=build_pipeline(...), name="app")`, so `adk run`/`adk web` drive the real pipeline. All **166 contract tests preserved** + tree integration tests.
+- **O3 — ADK guide** (`docs/ADK-GUIDE.md`): detailed — ADK pieces used, the agent-tree diagram, each agent's role/IO/file, the LLM agents (model/prompt/output_schema), exactly how we connect (run_digest drives the tree; `run_agent_text` bridge; session-state flow; `App` for adk web/run), the injectable-boundary pattern, AI-Studio↔Vertex swap, how to run.
+- **Result:** `uv run pytest tests -q` → **195 passed** (offline); ruff clean. Every commit authored solely by AhmedHeshamSakr.
+- **Deferred (needs Gemini quota):** live `adk run`/`adk web` driving the tree's Gemini nodes; a live end-to-end tree run.
+
 ### Next
-- **Open PRs (merge in order):** #8 youtube → #9 quality safety net → #10 source-resolve. Stack is deep — recommend merging the chain soon.
-- **Paused mid-design:** **Plan 8 — orchestration** (ADK `SequentialAgent`/`ParallelAgent` tree wiring `root_agent`; retire the dead weather `root_agent`; Option C — additive tree, keep `run_digest`). Plan doc written (`docs/superpowers/plans/2026-05-24-plan8-orchestration.md`, currently untracked — commit on `feat/orchestration` when resumed). Then **Plan 9 — GCP prod**.
-- **Deferred access:** X (paid API / RSS bridge) + LinkedIn (compliant provider) monitoring; console screens needing new endpoints; live spikes (Plan 7 grounding; YouTube summary + Whisper; eval/critic live).
+- **PR (Plan 8)** `feat/orchestration` → `main` — open for review/merge (**delete branch on merge**).
+- Then **Plan 9 — GCP prod** (Vertex via `GOOGLE_GENAI_USE_VERTEXAI`, Firestore, Cloud Run/Agent Engine deploy of the `App`, Cloud Scheduler, observability/auth).
+- **Deferred:** X (paid API / RSS bridge) + LinkedIn (compliant provider); console screens needing new endpoints; live spikes (Plan 7 grounding; YouTube summary + Whisper; eval/critic live).
