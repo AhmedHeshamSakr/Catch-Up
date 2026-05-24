@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FileText, ChevronRight } from "lucide-react";
 import { useRuns } from "@/lib/hooks";
 import { PageHeader } from "@/components/layout/page-header";
@@ -31,6 +32,7 @@ function DigestTableSkeleton() {
 }
 
 export default function DigestsPage() {
+  const router = useRouter();
   const { data: runs, error, isLoading, mutate } = useRuns();
 
   return (
@@ -86,7 +88,11 @@ export default function DigestsPage() {
               </TableHeader>
               <TableBody>
                 {runs.map((run) => (
-                  <TableRow key={run.run_id} className="group cursor-pointer">
+                  <TableRow
+                    key={run.run_id}
+                    onClick={() => router.push(`/digests/${run.run_id}`)}
+                    className="group cursor-pointer hover:bg-muted/40"
+                  >
                     <TableCell className="pl-4">
                       <Link
                         href={`/digests/${run.run_id}`}
