@@ -125,6 +125,7 @@ function SourceFormBody({
       if (r.name && form.name.trim() === "") {
         set("name", r.name);
       }
+      setLinkInput("");
       toast.success("Resolved");
     } catch (e) {
       toast.error(
