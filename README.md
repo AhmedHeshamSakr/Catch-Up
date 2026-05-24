@@ -20,9 +20,11 @@ Cloud Scheduler + Vertex AI + Firestore) by configuration — not a rewrite.
 Next.js console  ⇄  FastAPI API  ⇄  run_digest()/ADK Runner  ⇄  services  ⇄  Storage
 
 NewsCatchUpPipeline (ADK SequentialAgent)
-  Collection (ParallelAgent: RSS · Scrape · API · Search-Grounding)
-  → NormalizeDedup → Processing (LLM) → DigestEditor (LLM) → Render (xlsx/HTML/MD)
+  CollectSources (ParallelAgent: RSS · Scrape · API · Search · YouTube)
+  → NormalizeDedup → Processing (LLM) → Guardrail (critic) → DigestEditor (LLM) → Render (xlsx/HTML/MD)
 ```
+
+**Everything runs through ADK:** `run_digest` builds and executes this agent tree via an ADK `Runner`, and `adk run app` / `adk web` drive the same tree. See **[docs/ADK-GUIDE.md](docs/ADK-GUIDE.md)** for the full ADK architecture & integration guide.
 
 ## Tech
 
