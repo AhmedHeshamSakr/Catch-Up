@@ -17,6 +17,7 @@ dependencies = [
     "openpyxl>=3.1.5",
     "beautifulsoup4>=4.14.3",
     "fastapi>=0.136.1",
+    "youtube-transcript-api>=1.2.4",
 ]
 requires-python = ">=3.11,<3.14"
 
@@ -39,6 +40,10 @@ lint = [
     "ruff>=0.4.6,<1.0.0",
     "ty>=0.0.1a0",
     "codespell>=2.2.0,<3.0.0",
+]
+whisper = [
+    "yt-dlp",
+    "faster-whisper",
 ]
 
 [tool.ruff]

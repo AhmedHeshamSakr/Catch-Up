@@ -34,11 +34,13 @@ function typeVariant(
       return "outline";
     case "search":
       return "outline";
+    case "youtube":
+      return "secondary";
   }
 }
 
 function sourceTarget(s: SourceConfig): string {
-  return s.url ?? s.query ?? s.selector ?? "—";
+  return s.url ?? s.query ?? s.selector ?? s.channel_id ?? "—";
 }
 
 export function SourceTable({

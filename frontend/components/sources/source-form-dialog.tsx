@@ -34,6 +34,7 @@ interface FormState {
   selector: string;
   lang: string;
   country: string;
+  channelId: string;
   categoryHint: Category | "";
   enabled: boolean;
 }
@@ -48,6 +49,7 @@ function blankForm(): FormState {
     selector: "",
     lang: "",
     country: "",
+    channelId: "",
     categoryHint: "",
     enabled: true,
   };
@@ -63,6 +65,7 @@ function sourceToForm(s: SourceConfig): FormState {
     selector: s.selector ?? "",
     lang: s.lang ?? "",
     country: s.country ?? "",
+    channelId: s.channel_id ?? "",
     categoryHint: s.category_hint ?? "",
     enabled: s.enabled,
   };
@@ -112,6 +115,7 @@ function SourceFormBody({
       url: form.url.trim() || null,
       query: form.query.trim() || null,
       selector: form.selector.trim() || null,
+      channel_id: form.channelId.trim() || null,
     };
 
     const validationErrors = validateSource(draft);
@@ -130,9 +134,10 @@ function SourceFormBody({
       id: draft.id,
       type: form.type,
       name: draft.name,
-      url: draft.url,
-      query: draft.query,
-      selector: draft.selector,
+      url: form.type !== "youtube" ? draft.url : null,
+      query: form.type !== "youtube" ? draft.query : null,
+      selector: form.type !== "youtube" ? draft.selector : null,
+      channel_id: form.type === "youtube" ? draft.channel_id : null,
       category_hint: form.categoryHint || null,
       lang: form.lang.trim() || null,
       country: form.country.trim() || null,
@@ -271,6 +276,20 @@ function SourceFormBody({
               value={form.country}
               onChange={(e) => set("country", e.target.value)}
               placeholder="us"
+            />
+          </div>
+        )}
+
+        {fields.includes("channel_id") && (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="src-channel-id">Channel ID</Label>
+            <Input
+              id="src-channel-id"
+              value={form.channelId}
+              onChange={(e) => set("channelId", e.target.value)}
+              placeholder="UCxxxxxxxxxxxxxxxxxxxxxx"
+              className="font-mono"
+              aria-invalid={errors.some((e) => /channel id/i.test(e))}
             />
           </div>
         )}

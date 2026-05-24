@@ -14,6 +14,9 @@ describe("fieldsForType", () => {
   it("search needs only query", () => {
     expect(fieldsForType("search")).toEqual(["query"]);
   });
+  it("youtube needs only channel_id", () => {
+    expect(fieldsForType("youtube")).toEqual(["channel_id"]);
+  });
 });
 
 describe("validateSource", () => {
@@ -159,5 +162,31 @@ describe("validateSource", () => {
       selector: null,
     });
     expect(errs.some((e) => /id/i.test(e))).toBe(true);
+  });
+
+  it("flags missing channel_id for youtube source", () => {
+    const errs = validateSource({
+      id: "yt",
+      name: "My Channel",
+      type: "youtube",
+      url: null,
+      query: null,
+      selector: null,
+      channel_id: null,
+    });
+    expect(errs.some((e) => /channel id/i.test(e))).toBe(true);
+  });
+
+  it("passes a valid youtube source with channel_id", () => {
+    const errs = validateSource({
+      id: "yt",
+      name: "My Channel",
+      type: "youtube",
+      url: null,
+      query: null,
+      selector: null,
+      channel_id: "UCxxxxxxxxxxxxxxxxxxxxxx",
+    });
+    expect(errs).toEqual([]);
   });
 });

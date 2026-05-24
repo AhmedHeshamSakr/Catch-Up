@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015"
+      xmlns:media="http://search.yahoo.com/mrss/"
+      xmlns="http://www.w3.org/2005/Atom">
+  <link rel="self" href="https://www.youtube.com/feeds/videos.xml?channel_id=UCBJycsmduvYEL83R_U4JriQ"/>
+  <id>yt:channel:UCBJycsmduvYEL83R_U4JriQ</id>
+  <yt:channelId>UCBJycsmduvYEL83R_U4JriQ</yt:channelId>
+  <title>MKBHD (YouTube)</title>
+  <link rel="alternate" href="https://www.youtube.com/channel/UCBJycsmduvYEL83R_U4JriQ"/>
+  <author>
+    <name>Marques Brownlee</name>
+    <uri>https://www.youtube.com/channel/UCBJycsmduvYEL83R_U4JriQ</uri>
+  </author>
+  <published>2008-03-21T00:00:00+00:00</published>
+
+  <entry>
+    <id>yt:video:dQw4w9WgXcQ</id>
+    <yt:videoId>dQw4w9WgXcQ</yt:videoId>
+    <yt:channelId>UCBJycsmduvYEL83R_U4JriQ</yt:channelId>
+    <title>The Best Smartphone of 2026!</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ"/>
+    <author>
+      <name>Marques Brownlee</name>
+      <uri>https://www.youtube.com/channel/UCBJycsmduvYEL83R_U4JriQ</uri>
+    </author>
+    <published>2026-05-20T18:00:00+00:00</published>
+    <updated>2026-05-20T20:00:00+00:00</updated>
+    <media:group>
+      <media:title>The Best Smartphone of 2026!</media:title>
+      <media:content url="https://www.youtube.com/v/dQw4w9WgXcQ?version=3" type="application/x-shockwave-flash" width="640" height="390"/>
+      <media:thumbnail url="https://i2.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg" width="480" height="360"/>
+      <media:description>A deep dive into the best smartphones released in 2026, comparing cameras, battery, and performance.</media:description>
+      <media:community>
+        <media:starRating count="12345" average="4.90" min="1" max="5"/>
+        <media:statistics views="500000"/>
+      </media:community>
+    </media:group>
+  </entry>
+
+  <entry>
+    <id>yt:video:abc123XYZ99</id>
+    <yt:videoId>abc123XYZ99</yt:videoId>
+    <yt:channelId>UCBJycsmduvYEL83R_U4JriQ</yt:channelId>
+    <title>Why AI Will Change Everything</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=abc123XYZ99"/>
+    <author>
+      <name>Marques Brownlee</name>
+      <uri>https://www.youtube.com/channel/UCBJycsmduvYEL83R_U4JriQ</uri>
+    </author>
+    <published>2026-05-18T14:30:00+00:00</published>
+    <updated>2026-05-18T16:00:00+00:00</updated>
+    <media:group>
+      <media:title>Why AI Will Change Everything</media:title>
+      <media:content url="https://www.youtube.com/v/abc123XYZ99?version=3" type="application/x-shockwave-flash" width="640" height="390"/>
+      <media:thumbnail url="https://i2.ytimg.com/vi/abc123XYZ99/hqdefault.jpg" width="480" height="360"/>
+      <media:description>Exploring how artificial intelligence is reshaping tech, society, and creative industries.</media:description>
+      <media:community>
+        <media:starRating count="8000" average="4.80" min="1" max="5"/>
+        <media:statistics views="300000"/>
+      </media:community>
+    </media:group>
+  </entry>
+
+</feed>

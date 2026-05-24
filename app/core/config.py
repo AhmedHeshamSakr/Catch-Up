@@ -21,6 +21,7 @@ class SourceConfig(BaseModel):
     selector: str | None = None   # CSS selector for scrape sources
     lang: str | None = None       # e.g. "en", "ar" (api sources)
     country: str | None = None    # e.g. "qa", "us" (api sources)
+    channel_id: str | None = None  # explicit YouTube channel id (UC…)
     enabled: bool = True
 
 
@@ -36,6 +37,8 @@ class Settings(BaseSettings):
     llm_batch_size: int = 8
     llm_model: str = "gemini-flash-latest"
     gnews_api_key: str = ""
+    youtube_whisper_enabled: bool = False
+    whisper_model: str = "base"
 
 
 def load_sources(config_dir: str | Path) -> list[SourceConfig]:

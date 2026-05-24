@@ -8,7 +8,7 @@ from app.core.config import Settings, SourceConfig, load_sources
 from app.core.domain import DigestRun, Importance, RawItem, RunStatus, SourceType
 from app.core.ports.storage import StorageBackend
 from app.pipeline import digest_editor, processing
-from app.services import newsapi, normalize, rss, scrape, search
+from app.services import newsapi, normalize, rss, scrape, search, youtube
 from app.services.render import excel, markdown
 from app.services.render import html as html_render
 from app.services.watchlist import load_watchlist
@@ -20,7 +20,7 @@ def build_storage(settings: Settings) -> StorageBackend:
     return backend
 
 
-def _collect(source: SourceConfig, settings: Settings) -> list[RawItem]:
+def _collect(source: SourceConfig, settings: Settings, storage: StorageBackend | None = None) -> list[RawItem]:
     if source.type == SourceType.RSS:
         return rss.collect(source)
     if source.type == SourceType.API:
@@ -29,6 +29,8 @@ def _collect(source: SourceConfig, settings: Settings) -> list[RawItem]:
         return scrape.collect(source)
     if source.type == SourceType.SEARCH:
         return search.collect(source, settings)
+    if source.type == SourceType.YOUTUBE:
+        return youtube.collect(source, settings, storage=storage)
     return []
 
 
@@ -60,7 +62,7 @@ def run_digest(
             if not source.enabled:
                 continue
             try:
-                raws.extend(_collect(source, settings))
+                raws.extend(_collect(source, settings, storage))
             except Exception as exc:  # per-source isolation
                 run.source_errors.append(
                     {

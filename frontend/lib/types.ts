@@ -1,4 +1,4 @@
-export type SourceType = "rss" | "scrape" | "api" | "search";
+export type SourceType = "rss" | "scrape" | "api" | "search" | "youtube";
 export type Category = "ai_tech" | "business_finance" | "world_geopolitics" | "gulf_mena";
 export type Importance = "low" | "medium" | "high";
 export type Sentiment = "positive" | "neutral" | "negative";
@@ -64,6 +64,7 @@ export interface SourceConfig {
   selector: string | null;
   lang: string | null;
   country: string | null;
+  channel_id: string | null;
   enabled: boolean;
 }
 
