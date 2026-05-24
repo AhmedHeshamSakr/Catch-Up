@@ -53,6 +53,7 @@ export const newsItemSchema = z.object({
   language: z.string().nullable(),
   status: z.string(),
   digest_run_id: z.string().nullable(),
+  image_url: z.string().nullish(),
 });
 
 export const digestRunSchema = z.object({

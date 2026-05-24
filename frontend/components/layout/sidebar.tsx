@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import { HealthPill } from "./health-pill";
 import { ThemeToggle } from "./theme-toggle";
+import { LanguageToggle } from "./language-toggle";
 import { Separator } from "@/components/ui/separator";
 
 interface NavItem {
@@ -174,7 +175,10 @@ export function Sidebar() {
         {/* Health + Theme row */}
         <div className="flex items-center justify-between px-1">
           <HealthPill />
-          <ThemeToggle />
+          <div className="flex items-center gap-1.5">
+            <LanguageToggle />
+            <ThemeToggle />
+          </div>
         </div>
 
         {/* Profile row — presentational, no account menu wired up yet */}

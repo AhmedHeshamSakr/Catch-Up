@@ -28,6 +28,7 @@ export interface NewsItem {
   language: string | null;
   status: string;
   digest_run_id: string | null;
+  image_url?: string | null;
 }
 
 export interface DigestRun {
