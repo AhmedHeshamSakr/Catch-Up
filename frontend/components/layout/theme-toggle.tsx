@@ -25,7 +25,7 @@ export function ThemeToggle() {
       <DropdownMenuTrigger
         className={cn(
           buttonVariants({ variant: "ghost", size: "icon" }),
-          "h-7 w-7 text-muted-foreground hover:text-foreground"
+          "text-muted-foreground hover:text-foreground"
         )}
         aria-label="Toggle theme"
       >

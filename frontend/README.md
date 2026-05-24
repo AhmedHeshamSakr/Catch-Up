@@ -1,36 +1,62 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Catch-Up Console ("Signal")
 
-## Getting Started
+The web console for the **Catch-Up** news intelligence agent. It is a read/write
+control surface for the FastAPI backend: browse the latest digest runs, drill
+into per-run news items, filter the news feed, and manage sources and the
+watchlist.
 
-First, run the development server:
+Built with Next.js 16 (App Router), React 19, TypeScript (strict), Tailwind v4,
+`@base-ui/react`, `next-themes`, and SWR. API responses are validated at the
+boundary with zod (`lib/schemas.ts`).
+
+## Prerequisites
+
+- Node.js 20+ and npm
+- The Catch-Up FastAPI backend running locally (see below) — the console has no
+  data of its own; it talks to the backend API.
+
+## Backend dependency
+
+The console reads from and writes to the FastAPI backend. Start it from the
+**repo root** (one level up from this directory):
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+uv run python -m app.cli serve
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+By default the backend listens on `http://localhost:8000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Configure the backend URL via `NEXT_PUBLIC_API_BASE`. Copy the example and
+adjust if your backend runs elsewhere:
 
-## Learn More
+```bash
+cp .env.local.example .env.local
+```
 
-To learn more about Next.js, take a look at the following resources:
+```env
+# .env.local
+NEXT_PUBLIC_API_BASE=http://localhost:8000
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+If unset, the console falls back to `http://localhost:8000`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Getting started
 
-## Deploy on Vercel
+```bash
+npm install
+npm run dev
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Open [http://localhost:3000](http://localhost:3000).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Scripts
+
+| Command         | Description                                   |
+| --------------- | --------------------------------------------- |
+| `npm run dev`   | Start the dev server on port 3000             |
+| `npm run build` | Production build                              |
+| `npm start`     | Serve the production build                    |
+| `npm test`      | Run the test suite (Vitest)                  |
+| `npm run lint`  | Lint with ESLint                             |

@@ -58,7 +58,7 @@ export function SourceTable({
           <TableHead>Category</TableHead>
           <TableHead>Target</TableHead>
           <TableHead>Enabled</TableHead>
-          <TableHead className="w-20 text-right">Actions</TableHead>
+          <TableHead className="w-24 text-right">Actions</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -107,10 +107,10 @@ export function SourceTable({
                 />
               </TableCell>
               <TableCell>
-                <div className="flex items-center justify-end gap-1">
+                <div className="flex items-center justify-end gap-2">
                   <Button
                     variant="ghost"
-                    size="icon-sm"
+                    size="icon"
                     onClick={() => onEdit(source)}
                     aria-label={`Edit ${source.name}`}
                   >
@@ -118,7 +118,7 @@ export function SourceTable({
                   </Button>
                   <Button
                     variant="ghost"
-                    size="icon-sm"
+                    size="icon"
                     onClick={() => onDelete(source)}
                     aria-label={`Delete ${source.name}`}
                     className="text-destructive hover:text-destructive hover:bg-destructive/10"

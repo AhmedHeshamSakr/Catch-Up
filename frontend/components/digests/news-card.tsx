@@ -1,4 +1,6 @@
-import type { NewsItem } from "@/lib/types";
+import { TrendingUp, Minus, TrendingDown } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import type { NewsItem, Sentiment } from "@/lib/types";
 import { ImportanceBadge } from "@/components/common/importance-badge";
 import { formatRelative, scorePct } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -7,11 +9,13 @@ interface NewsCardProps {
   item: NewsItem;
 }
 
-const sentimentStyles = {
-  positive: "bg-emerald-500 dark:bg-emerald-400",
-  neutral: "bg-muted-foreground/40",
-  negative: "bg-red-500 dark:bg-red-400",
-} as const;
+// Each sentiment pairs a color with a distinct icon shape so the signal is
+// readable without relying on color alone (WCAG 1.4.1).
+const sentimentMeta: Record<Sentiment, { color: string; icon: LucideIcon }> = {
+  positive: { color: "text-emerald-600 dark:text-emerald-400", icon: TrendingUp },
+  neutral: { color: "text-muted-foreground", icon: Minus },
+  negative: { color: "text-red-600 dark:text-red-400", icon: TrendingDown },
+};
 
 export function NewsCard({ item }: NewsCardProps) {
   const timeLabel = item.published_at ?? item.collected_at;
@@ -30,15 +34,16 @@ export function NewsCard({ item }: NewsCardProps) {
         >
           {item.title}
         </a>
-        {item.sentiment && (
-          <span
-            className={cn(
-              "mt-1 size-2 shrink-0 rounded-full",
-              sentimentStyles[item.sentiment]
-            )}
-            aria-label={`Sentiment: ${item.sentiment}`}
-          />
-        )}
+        {item.sentiment &&
+          (() => {
+            const { color, icon: SentimentIcon } = sentimentMeta[item.sentiment];
+            return (
+              <SentimentIcon
+                className={cn("mt-0.5 size-4 shrink-0", color)}
+                aria-label={`Sentiment: ${item.sentiment}`}
+              />
+            );
+          })()}
       </div>
 
       {/* Meta row */}
@@ -76,9 +81,9 @@ export function NewsCard({ item }: NewsCardProps) {
       {/* Entities */}
       {visibleEntities.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {visibleEntities.map((entity, i) => (
+          {visibleEntities.map((entity) => (
             <span
-              key={i}
+              key={`${entity.name}-${entity.type}`}
               className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
             >
               {entity.name}
