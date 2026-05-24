@@ -29,7 +29,7 @@ it("listNews omits undefined filters", async () => {
 it("putSources sends PUT with JSON body", async () => {
   const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "ok", count: 1 }), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
-  await api.putSources([{ id: "s", type: "rss", name: "S", url: "https://x", query: null, category_hint: null, selector: null, lang: null, country: null, enabled: true }]);
+  await api.putSources([{ id: "s", type: "rss", name: "S", url: "https://x", query: null, category_hint: null, selector: null, lang: null, country: null, channel_id: null, enabled: true }]);
   const [, opts] = fetchMock.mock.calls[0];
   expect(opts.method).toBe("PUT");
   expect(JSON.parse(opts.body)[0].id).toBe("s");

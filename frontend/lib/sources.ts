@@ -1,6 +1,6 @@
 import type { SourceType } from "@/lib/types";
 
-export type SourceField = "url" | "selector" | "query" | "lang" | "country";
+export type SourceField = "url" | "selector" | "query" | "lang" | "country" | "channel_id";
 
 export function fieldsForType(type: SourceType): SourceField[] {
   switch (type) {
@@ -12,6 +12,8 @@ export function fieldsForType(type: SourceType): SourceField[] {
       return ["query", "lang", "country"];
     case "search":
       return ["query"];
+    case "youtube":
+      return ["channel_id"];
   }
 }
 
@@ -20,6 +22,7 @@ export const REQUIRED_BY_TYPE: Record<SourceType, SourceField[]> = {
   scrape: ["url", "selector"],
   api: ["query"],
   search: ["query"],
+  youtube: ["channel_id"],
 };
 
 const FIELD_LABELS: Record<SourceField, string> = {
@@ -28,6 +31,7 @@ const FIELD_LABELS: Record<SourceField, string> = {
   query: "Query",
   lang: "Language",
   country: "Country",
+  channel_id: "Channel ID",
 };
 
 const TYPE_LABELS: Record<SourceType, string> = {
@@ -35,6 +39,7 @@ const TYPE_LABELS: Record<SourceType, string> = {
   scrape: "Scrape",
   api: "API",
   search: "Search",
+  youtube: "YouTube",
 };
 
 /** Returns array of human-readable validation errors. Empty array means valid. */
@@ -45,6 +50,7 @@ export function validateSource(s: {
   url: string | null;
   query: string | null;
   selector: string | null;
+  channel_id?: string | null;
 }): string[] {
   const errors: string[] = [];
 
