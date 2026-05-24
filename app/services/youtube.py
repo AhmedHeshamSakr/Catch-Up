@@ -12,7 +12,7 @@ import httpx
 
 from app.core.config import Settings, SourceConfig
 from app.core.domain import RawItem, SourceType, make_item_id
-from app.pipeline.adk_runtime import run_agent_text
+from app.llm.runtime import run_agent_text
 
 log = logging.getLogger(__name__)
 
@@ -206,7 +206,7 @@ def build_youtube_summary_agent(model: str):
     """Build a search-free ADK agent that summarizes a transcript."""
     from google.adk.agents import Agent
 
-    from app.pipeline.schema import DigestNarrative  # reuse {narrative: str} shape
+    from app.llm.schema import DigestNarrative  # reuse {narrative: str} shape
 
     return Agent(
         name="youtube_summarizer",
@@ -219,7 +219,7 @@ def build_youtube_summary_agent(model: str):
 
 def adk_summarize(text: str, settings: Settings) -> str:
     """Run the summarizer agent on ``text`` and return a short blurb."""
-    from app.pipeline.schema import DigestNarrative
+    from app.llm.schema import DigestNarrative
 
     agent = build_youtube_summary_agent(settings.llm_model)
     raw = run_agent_text(agent, text, settings)

@@ -8,8 +8,8 @@ from app.core.domain import (
     Sentiment,
     SourceType,
 )
+from app.llm.schema import ItemEnrichment, ProcessingResult
 from app.pipeline import processing
-from app.pipeline.schema import ItemEnrichment, ProcessingResult
 from app.services.watchlist import Watchlist
 
 

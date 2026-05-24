@@ -12,7 +12,7 @@ import asyncio
 
 import pytest
 
-from app.pipeline import adk_runtime
+from app.llm import runtime as adk_runtime
 
 _CANNED = "canned model output"
 

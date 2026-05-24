@@ -4,8 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.core.domain import Category, NewsItem, Sentiment
+from app.llm.schema import ItemEnrichment, ProcessingResult
 from app.pipeline.eval_schema import DimensionVerdict, EnrichmentVerdict
-from app.pipeline.schema import ItemEnrichment, ProcessingResult
 
 _REFERENCE_PATH = (
     Path(__file__).resolve().parents[2]

@@ -11,7 +11,7 @@ from google.genai import types
 
 from app.core.config import Settings, SourceConfig
 from app.core.domain import RawItem, SourceType
-from app.pipeline.adk_runtime import ensure_api_key
+from app.llm.runtime import ensure_api_key
 
 if TYPE_CHECKING:
     from google.genai.types import GroundingMetadata

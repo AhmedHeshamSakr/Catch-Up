@@ -16,11 +16,11 @@ import json
 from pathlib import Path
 
 from app.core.domain import Category, NewsItem, Sentiment, SourceType
+from app.llm.schema import ItemEnrichment, ProcessingResult
 from app.pipeline.eval_schema import EnrichmentVerdict
 from app.pipeline.eval_score import EvalReport, aggregate
 from app.pipeline.judge import JudgeFn
 from app.pipeline.processing import EnrichFn
-from app.pipeline.schema import ItemEnrichment, ProcessingResult
 
 _REFERENCE_PATH = Path(__file__).resolve().parents[1] / "tests" / "eval" / "fixtures" / "enrichment_reference.json"
 

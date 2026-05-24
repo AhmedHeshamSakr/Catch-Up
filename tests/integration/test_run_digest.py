@@ -4,7 +4,7 @@ from app import runner
 from app.adapters.storage.sqlite_backend import SqliteBackend
 from app.core.config import Settings
 from app.core.domain import Category, RawItem, RunStatus, SourceType
-from app.pipeline.schema import ProcessingResult
+from app.llm.schema import ProcessingResult
 
 
 def _raw(url: str, title: str) -> RawItem:

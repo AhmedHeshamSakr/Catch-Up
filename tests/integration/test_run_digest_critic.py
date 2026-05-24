@@ -8,8 +8,8 @@ from pathlib import Path
 from app import runner
 from app.core.config import Settings
 from app.core.domain import Category, RawItem, RunStatus, SourceType
+from app.llm.schema import ItemEnrichment, ProcessingResult
 from app.pipeline.eval_schema import FaithfulnessVerdict
-from app.pipeline.schema import ItemEnrichment, ProcessingResult
 
 
 def _raw(url, title):
