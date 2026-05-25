@@ -12,10 +12,10 @@ def storage(tmp_path):
     return backend
 
 
-def _raw(url: str, title: str) -> RawItem:
+def _raw(url: str, title: str, image_url: str | None = None) -> RawItem:
     return RawItem(
         source_id="s", source_type=SourceType.RSS, source_name="S",
-        url=url, title=title, category_hint=Category.AI_TECH,
+        url=url, title=title, category_hint=Category.AI_TECH, image_url=image_url,
     )
 
 
@@ -39,3 +39,14 @@ def test_filters_items_already_in_storage(storage):
         storage, run_id="r1",
     )
     assert [i.url for i in out] == ["https://a.com/9"]
+
+
+def test_image_url_carries_through_normalize_and_storage_roundtrip(storage):
+    out = normalize.normalize_and_dedup(
+        [_raw("https://a.com/img", "Img", image_url="https://img.a.com/t.jpg")],
+        storage, run_id="r1",
+    )
+    assert out[0].image_url == "https://img.a.com/t.jpg"
+    storage.save_items(out)
+    loaded = storage.get_items_for_run("r1")
+    assert loaded[0].image_url == "https://img.a.com/t.jpg"

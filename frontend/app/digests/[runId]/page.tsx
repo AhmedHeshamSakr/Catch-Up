@@ -10,34 +10,10 @@ import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
-import { NewsCard } from "@/components/digests/news-card";
+import { NewsGroups } from "@/components/digests/news-groups";
 import { OutputLinks } from "@/components/digests/output-links";
 import { formatDateTime } from "@/lib/format";
-import { CATEGORY_LABELS } from "@/lib/labels";
-import type { Category, NewsItem } from "@/lib/types";
 import { ApiError } from "@/lib/api";
-
-const CATEGORY_ORDER: (Category | null)[] = [
-  "ai_tech",
-  "business_finance",
-  "world_geopolitics",
-  "gulf_mena",
-  null,
-];
-
-function groupByCategory(items: NewsItem[]): Map<Category | null, NewsItem[]> {
-  const map = new Map<Category | null, NewsItem[]>();
-  for (const item of items) {
-    const key = item.category ?? null;
-    const existing = map.get(key);
-    if (existing) {
-      existing.push(item);
-    } else {
-      map.set(key, [item]);
-    }
-  }
-  return map;
-}
 
 function truncateMiddle(str: string, maxLen = 40): string {
   if (str.length <= maxLen) return str;
@@ -122,7 +98,6 @@ export default function RunDetailPage() {
   }
 
   const { run, items } = data;
-  const grouped = groupByCategory(items);
 
   return (
     <div className="flex flex-col gap-6">
@@ -213,32 +188,11 @@ export default function RunDetailPage() {
         </div>
       )}
 
-      {/* Items by category */}
+      {/* Items by importance */}
       {items.length === 0 ? (
         <p className="text-sm text-muted-foreground">No items in this run.</p>
       ) : (
-        <div className="flex flex-col gap-8">
-          {CATEGORY_ORDER.map((cat) => {
-            const group = grouped.get(cat);
-            if (!group || group.length === 0) return null;
-            const label = cat ? CATEGORY_LABELS[cat] : "Uncategorized";
-            return (
-              <section key={cat ?? "uncategorized"}>
-                <h3 className="mb-3 text-sm font-semibold text-foreground flex items-baseline gap-2">
-                  {label}
-                  <span className="font-mono tabular-nums text-xs font-normal text-muted-foreground">
-                    {group.length}
-                  </span>
-                </h3>
-                <div className="flex flex-col gap-3">
-                  {group.map((item) => (
-                    <NewsCard key={item.id} item={item} />
-                  ))}
-                </div>
-              </section>
-            );
-          })}
-        </div>
+        <NewsGroups items={items} />
       )}
     </div>
   );

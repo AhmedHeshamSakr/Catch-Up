@@ -8,7 +8,7 @@ import { CATEGORY_LABELS, IMPORTANCE_LABELS } from "@/lib/labels";
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState } from "@/components/common/empty-state";
 import { AsyncBoundary } from "@/components/common/async-boundary";
-import { NewsCard } from "@/components/digests/news-card";
+import { NewsGroups } from "@/components/digests/news-groups";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -16,21 +16,25 @@ import { Label } from "@/components/ui/label";
 const LIMIT_OPTIONS = [25, 50, 100] as const;
 type Limit = (typeof LIMIT_OPTIONS)[number];
 
-// NewsCard-shaped skeleton for loading state
+// NewsCard-shaped skeleton for loading state — mirrors the briefing layout
+// (side thumbnail + top badges, headline, clamped takeaway, meta row).
 function NewsCardSkeleton() {
   return (
-    <div className="flex flex-col gap-2 rounded-xl bg-card ring-1 ring-foreground/10 px-4 py-3">
-      <div className="flex items-start justify-between gap-3">
+    <div className="flex gap-3 rounded-xl bg-card ring-1 ring-foreground/10 border-l-2 border-foreground/10 px-4 py-3">
+      <Skeleton className="hidden sm:block h-16 w-16 sm:h-20 sm:w-28 shrink-0 rounded-lg" />
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-5 w-14 rounded-full" />
+          <Skeleton className="h-5 w-24 rounded-full" />
+        </div>
         <Skeleton className="h-4 w-3/4" />
-        <Skeleton className="mt-1 size-2 shrink-0 rounded-full" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-5/6" />
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-3 w-20" />
+          <Skeleton className="h-3 w-14 font-mono" />
+        </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Skeleton className="h-5 w-14 rounded-full" />
-        <Skeleton className="h-4 w-20" />
-        <Skeleton className="h-4 w-16 font-mono" />
-      </div>
-      <Skeleton className="h-4 w-full" />
-      <Skeleton className="h-4 w-2/3" />
     </div>
   );
 }
@@ -161,13 +165,7 @@ export default function NewsPage() {
           </Card>
         }
       >
-        {data && data.length > 0 && (
-          <div className="flex flex-col gap-3">
-            {data.map((item) => (
-              <NewsCard key={item.id} item={item} />
-            ))}
-          </div>
-        )}
+        {data && data.length > 0 && <NewsGroups items={data} />}
       </AsyncBoundary>
     </div>
   );

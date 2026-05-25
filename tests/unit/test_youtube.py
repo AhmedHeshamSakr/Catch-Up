@@ -80,6 +80,24 @@ def test_parse_channel_feed_description_populated():
     assert "smartphone" in videos[0].description.lower()
 
 
+def test_parse_channel_feed_extracts_thumbnail_image_url():
+    videos = yt.parse_channel_feed(_FIXTURE_XML)
+    assert videos[0].image_url == "https://i2.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"
+    assert videos[1].image_url == "https://i2.ytimg.com/vi/abc123XYZ99/hqdefault.jpg"
+
+
+def test_collect_propagates_image_url():
+    items = yt.collect(
+        _source(),
+        _SETTINGS,
+        fetch=_fake_fetch,
+        transcript=_fake_transcript,
+        summarize=_fake_summarize,
+    )
+    assert all(i.image_url for i in items)
+    assert items[0].image_url == "https://i2.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"
+
+
 # ---------------------------------------------------------------------------
 # collect — happy path (injected fetch + transcript + summarize)
 # ---------------------------------------------------------------------------

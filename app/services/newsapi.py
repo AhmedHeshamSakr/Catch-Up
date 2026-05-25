@@ -5,7 +5,7 @@ from datetime import datetime
 
 from app.core.config import SourceConfig
 from app.core.domain import RawItem, SourceType
-from app.services.net import safe_get
+from app.services.net import is_http_url, safe_get
 
 GNEWS_SEARCH_URL = "https://gnews.io/api/v4/search"
 FetchFn = Callable[..., dict]
@@ -50,6 +50,7 @@ def parse_gnews(data: dict, source: SourceConfig) -> list[RawItem]:
         url = article.get("url")
         if not title or not url:
             continue
+        image = article.get("image")
         items.append(
             RawItem(
                 source_id=source.id,
@@ -58,6 +59,7 @@ def parse_gnews(data: dict, source: SourceConfig) -> list[RawItem]:
                 url=url,
                 title=title,
                 excerpt=article.get("description") or None,
+                image_url=image if is_http_url(image) else None,
                 published_at=_parse_dt(article.get("publishedAt")),
                 category_hint=source.category_hint,
             )

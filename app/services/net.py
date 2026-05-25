@@ -15,6 +15,23 @@ class UnsafeURLError(ValueError):
     """Raised when a URL is not safe to fetch (bad scheme or non-public address)."""
 
 
+def is_http_url(url: str | None) -> bool:
+    """Return True only for absolute http(s) URLs.
+
+    Used to validate per-article image URLs before storing them: rejects None,
+    empty, relative paths, and dangerous schemes (javascript:, data:, file:, ...)
+    so the browser only ever loads http(s) thumbnails. This is a cheap scheme
+    check, NOT an SSRF guard — we never server-side fetch the image.
+    """
+    if not url:
+        return False
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
 def _default_resolver(host: str) -> list[str]:
     return [info[4][0] for info in socket.getaddrinfo(host, None)]
 

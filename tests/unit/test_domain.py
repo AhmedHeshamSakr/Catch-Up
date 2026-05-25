@@ -23,3 +23,22 @@ def test_newsitem_from_raw_sets_id_category_and_status():
     assert item.status == "raw"
     assert item.digest_run_id == "r1"
     assert item.org_id == "default"
+
+
+def test_newsitem_from_raw_copies_image_url():
+    raw = RawItem(
+        source_id="tc", source_type=SourceType.RSS, source_name="TechCrunch",
+        url="https://x.com/a", title="Hello",
+        image_url="https://img.example/thumb.jpg",
+    )
+    item = NewsItem.from_raw(raw, run_id="r1")
+    assert item.image_url == "https://img.example/thumb.jpg"
+
+
+def test_newsitem_image_url_defaults_none():
+    raw = RawItem(
+        source_id="tc", source_type=SourceType.RSS, source_name="TechCrunch",
+        url="https://x.com/a", title="Hello",
+    )
+    assert raw.image_url is None
+    assert NewsItem.from_raw(raw, run_id="r1").image_url is None

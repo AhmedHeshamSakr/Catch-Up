@@ -9,9 +9,19 @@ SAMPLE = {
     "articles": [
         {"title": "AI breakthrough", "description": "desc one",
          "url": "https://news.example/1", "publishedAt": "2026-05-20T09:00:00Z",
+         "image": "https://img.example/1.jpg",
          "source": {"name": "Example News"}},
         {"title": "", "description": "no title -> skipped",
          "url": "https://news.example/2", "publishedAt": "2026-05-20T10:00:00Z",
+         "source": {"name": "Example News"}},
+    ],
+}
+
+SAMPLE_NO_IMAGE = {
+    "totalArticles": 1,
+    "articles": [
+        {"title": "No image article", "description": "desc",
+         "url": "https://news.example/3", "publishedAt": "2026-05-20T09:00:00Z",
          "source": {"name": "Example News"}},
     ],
 }
@@ -32,6 +42,16 @@ def test_parse_gnews_maps_articles_and_skips_invalid():
     assert it.source_name == "Example News"
     assert it.category_hint == Category.AI_TECH
     assert it.published_at is not None
+
+
+def test_parse_gnews_extracts_image():
+    items = newsapi.parse_gnews(SAMPLE, _source())
+    assert items[0].image_url == "https://img.example/1.jpg"
+
+
+def test_parse_gnews_image_none_when_absent():
+    items = newsapi.parse_gnews(SAMPLE_NO_IMAGE, _source())
+    assert items[0].image_url is None
 
 
 def test_collect_uses_injected_fetch():

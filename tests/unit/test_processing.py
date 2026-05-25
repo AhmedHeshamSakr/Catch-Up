@@ -14,7 +14,9 @@ from app.services.watchlist import Watchlist
 
 
 def test_settings_has_intelligence_defaults():
-    s = Settings()
+    # _env_file=None isolates the assertion from a developer's local app/.env
+    # (e.g. an LLM_MODEL override) so it verifies the source-code defaults.
+    s = Settings(_env_file=None)
     assert 0.0 <= s.importance_threshold <= 1.0
     assert s.llm_batch_size >= 1
     assert s.llm_model == "gemini-flash-latest"

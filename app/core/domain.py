@@ -124,6 +124,9 @@ class RawItem(BaseModel):
     excerpt: str | None = None
     published_at: datetime | None = None
     category_hint: Category | None = None
+    # Optional thumbnail; stored only, never server-side fetched (browser loads
+    # it directly). Collectors validate it as http(s) before setting it.
+    image_url: str | None = None
 
 
 class NewsItem(BaseModel):
@@ -136,6 +139,7 @@ class NewsItem(BaseModel):
     url: str
     title: str
     excerpt: str | None = None
+    image_url: str | None = None
     published_at: datetime | None = None
     collected_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     category: Category | None = None
@@ -159,6 +163,7 @@ class NewsItem(BaseModel):
             url=raw.url,
             title=raw.title,
             excerpt=raw.excerpt,
+            image_url=raw.image_url,
             published_at=raw.published_at,
             category=raw.category_hint,
             digest_run_id=run_id,
