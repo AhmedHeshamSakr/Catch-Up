@@ -42,3 +42,14 @@ def test_root_env_overrides_app_env(tmp_path, monkeypatch):
     # Root .env should win when both are present
     s = Settings()
     assert s.google_api_key == "root"
+
+
+def test_allow_origins_parses_comma_separated_env(monkeypatch):
+    monkeypatch.setenv("ALLOW_ORIGINS", "https://a.example , https://b.example")
+    s = Settings(_env_file=None)
+    assert s.allow_origins == ["https://a.example", "https://b.example"]
+
+
+def test_allow_origins_defaults_to_localhost(monkeypatch):
+    monkeypatch.delenv("ALLOW_ORIGINS", raising=False)
+    assert Settings(_env_file=None).allow_origins == ["http://localhost:3000"]
