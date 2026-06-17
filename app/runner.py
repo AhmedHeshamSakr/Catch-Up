@@ -87,6 +87,14 @@ async def _run_tree_with_timeout(tree, run_id: str, timeout: float | None) -> No
 
     On timeout, ``asyncio.wait_for`` raises ``TimeoutError`` — caught by
     run_digest's FAILED-path so the run is finalized FAILED and re-raised.
+
+    SOFT cap: the LLM stages run their blocking calls via ``asyncio.to_thread``,
+    so the timeout fires on schedule (the loop stays responsive) and the run is
+    marked FAILED at the right wall-clock time — but ``asyncio.run`` waits for
+    the in-flight worker thread to finish before ``run_digest`` returns (Python
+    can't force-kill a thread). The hard per-call bound is ``llm_timeout`` inside
+    ``run_agent_text``. Any item mutated by a worker after cancellation is on the
+    FAILED path and never persisted (RenderAgent doesn't run), so it's discarded.
     """
     if timeout is None:
         await _run_tree(tree, run_id)

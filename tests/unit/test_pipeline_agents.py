@@ -945,3 +945,49 @@ async def test_normalize_dedup_merges_every_collected_source_type(tmp_path):
 
     assert run.collected == len(COLLECTED_SOURCE_TYPES)
     assert len(state["items"]) == len(COLLECTED_SOURCE_TYPES)
+
+
+@pytest.mark.asyncio
+async def test_processing_agent_runs_processor_off_the_event_loop(tmp_path):
+    """The blocking LLM batch must run via asyncio.to_thread, so the event loop
+    stays free (and a run-level timeout can fire) while a stage is in flight.
+
+    On the old synchronous code this fails: process_items would run on the loop
+    thread, so the stage task would already be done by the time we observe the
+    processor having started.
+    """
+    import asyncio
+    import threading
+
+    settings = _settings(tmp_path)
+    storage = _storage(tmp_path)
+    run = DigestRun(run_id="r1")
+    state = {"run": run, "watchlist": Watchlist(), "items": [_news("https://a.com/1", "X")]}
+
+    in_processor = threading.Event()
+    release = threading.Event()
+
+    def blocking_processor(batch):
+        in_processor.set()
+        release.wait(timeout=5)
+        return ProcessingResult(items=[ItemEnrichment(
+            id=batch[0].id, category=Category.AI_TECH, importance_score=0.9,
+            summary_en="S", summary_ar="ملخص", entities=[], sentiment="neutral",
+        )])
+
+    agent = ProcessingAgent(name="Processing", settings=settings, storage=storage,
+                            processor=blocking_processor)
+    stage = asyncio.create_task(_run(agent, state))
+    try:
+        for _ in range(200):
+            if in_processor.is_set():
+                break
+            await asyncio.sleep(0.01)
+        assert in_processor.is_set(), "processor never started"
+        # The loop regained control and the stage is still awaiting the worker
+        # thread — proof the LLM call did not block the loop.
+        assert not stage.done()
+    finally:
+        release.set()
+    await stage
+    assert run.source_errors == []
