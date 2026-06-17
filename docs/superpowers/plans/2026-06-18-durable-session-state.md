@@ -291,7 +291,11 @@ from app.pipeline.agents import _read_items, _read_run  # tolerant readers
 async def _drive(agent, state: dict) -> dict:
     """Run one agent against a plain state dict, applying any yielded
     EventActions.state_delta (mimicking the ADK Runner), and return the state.
-    Tolerant of stages that still mutate state directly (empty delta)."""
+    Tolerant of stages that still mutate state directly (empty delta).
+
+    NB: a flat dict.update() is faithful ONLY for this pipeline's unprefixed
+    keys. It does NOT model ADK's special 'temp:'/'user:'/'app:' prefix
+    semantics — do not reuse this helper for state that uses those prefixes."""
     ctx = _ctx(state)  # existing per-test context builder (rename to match file)
     async for ev in agent._run_async_impl(ctx):
         if ev.actions and ev.actions.state_delta:
@@ -674,6 +678,7 @@ async def test_pipeline_init_emits_run_delta_no_object_seeds(tmp_path):
     agent = PipelineInitAgent(name="PipelineInit", settings=settings, storage=storage)
     _, events = await _drive_capture(agent, state)
     delta = events[-1].actions.state_delta
+    assert delta["run_id"] == "r1"
     assert delta["run"]["run_id"] == "r1" and isinstance(delta["run"], dict)
     assert "settings" not in delta and "watchlist" not in delta
     # state no longer carries non-serializable objects
@@ -687,16 +692,24 @@ Expected: FAIL — `state["settings"]`/`state["watchlist"]` still seeded; empty 
 
 - [ ] **Step 3: Migrate PipelineInitAgent**
 
-Replace the body after `self.storage.create_run(run)` (the `wl = ...` load and the three `state[...] =` writes and `yield`) with:
+Rewrite the WHOLE `_run_async_impl` body (the existing `state["run_id"] = run_id` direct mutation BEFORE `create_run` must also go — leaving it would suppress `run_id` from the delta). New body:
 ```python
-        # settings/storage are constructor-injected; watchlist is injected into
-        # the stages that need it (Processing/Critic). Seed only the durable run.
-        delta = _run_delta(run)
-        if state.get("run_id") != run_id:
-            delta["run_id"] = run_id
-        yield _make_event(ctx, self.name, delta)
+        state = ctx.session.state
+        run_id = state.get("run_id")
+        if not run_id:
+            import uuid
+
+            run_id = uuid.uuid4().hex[:12]
+        run = DigestRun(run_id=run_id)
+        self.storage.create_run(run)
+
+        # settings/storage are constructor-injected; watchlist is injected into the
+        # stages that need it (Processing/Critic). Seed only durable, JSON-
+        # serializable run state. run_id always travels in the delta (no direct
+        # state mutation) so it persists under a persistent session service.
+        yield _make_event(ctx, self.name, {"run_id": run_id, **_run_delta(run)})
 ```
-Remove the now-unused `load_watchlist` usage here (the import stays — Task 6/build_pipeline uses it). Remove the local `wl` variable.
+Remove the now-unused `load_watchlist` usage here (the import stays — Task 6/build_pipeline uses it) and the local `wl` variable.
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -857,7 +870,6 @@ def _settings(tmp_path) -> Settings:
 
 def test_run_digest_completes_on_database_session(tmp_path, monkeypatch):
     from app.core.domain import RawItem
-    import app.runner as runner_mod
 
     def fake_collect(source, s, storage=None):
         if source.type == SourceType.RSS:
@@ -872,7 +884,10 @@ def test_run_digest_completes_on_database_session(tmp_path, monkeypatch):
                            summary_en="S.", summary_ar="ملخص.", entities=[],
                            sentiment="neutral") for i in items])
 
-    monkeypatch.setattr(runner_mod, "_collect", fake_collect)
+    # build_pipeline binds the module-level _collect inside app.pipeline.agents
+    # (imported from app.runner). Patch it THERE, not on app.runner, or the fake
+    # is ignored once agents.py is already imported.
+    monkeypatch.setattr("app.pipeline.agents._collect", fake_collect)
     settings = _settings(tmp_path)
     run = run_digest(
         settings,
