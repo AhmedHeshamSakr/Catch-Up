@@ -402,9 +402,9 @@ class DigestEditorAgent(BaseAgent):
                 {"stage": "narrative", "error": str(exc), "ts": _now()}
             )
 
-        state["narrative"] = run.narrative
-
-        yield _make_event(ctx, self.name)
+        # run.narrative was set above; it travels in the run delta. The old
+        # standalone state["narrative"] key was vestigial (Render reads run.narrative).
+        yield _make_event(ctx, self.name, _run_delta(run))
 
 
 # ---------------------------------------------------------------------------

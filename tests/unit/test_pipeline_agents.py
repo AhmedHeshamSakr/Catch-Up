@@ -624,10 +624,11 @@ async def test_digest_editor_sets_narrative(tmp_path):
         storage=storage,
         narrator=lambda items: "Today's digest.",
     )
-    await _run(agent, state)
+    events = await _run(agent, state)
 
     assert run.narrative == "Today's digest."
-    assert state["narrative"] == "Today's digest."
+    # The narrative now travels inside the run delta (not a separate state key).
+    assert events[-1].actions.state_delta["run"]["narrative"] == "Today's digest."
 
 
 @pytest.mark.asyncio
@@ -698,6 +699,30 @@ async def test_digest_editor_narrator_failure_adds_stage_error(tmp_path):
     assert len(run.source_errors) == 1
     assert run.source_errors[0]["stage"] == "narrative"
     assert "narrator quota exhausted" in run.source_errors[0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_digest_editor_emits_run_delta_with_narrative(tmp_path):
+    settings = _settings(tmp_path)
+    storage = _storage(tmp_path)
+
+    item = _news("https://a.com/1", "Test")
+    item.status = "processed"
+
+    run = DigestRun(run_id="r1")
+    state = {"run": run, "watchlist": Watchlist(), "items": [item]}
+
+    agent = DigestEditorAgent(
+        name="DigestEditor", settings=settings, storage=storage,
+        narrator=lambda items: "A narrative.",
+    )
+    events = await _run(agent, state)
+
+    delta = events[-1].actions.state_delta
+    assert delta["run"]["narrative"] == "A narrative."
+    # The vestigial standalone narrative key is gone — only the run delta carries it.
+    assert "narrative" not in delta
+    assert "narrative" not in state
 
 
 # ---------------------------------------------------------------------------
