@@ -50,3 +50,34 @@ def test_write_sources_preserves_existing_comments(tmp_path):
     # The serialized shape must remain loadable by load_sources.
     loaded = load_sources(tmp_path)
     assert [s.id for s in loaded] == ["a"]
+
+
+def test_concurrent_writes_never_leave_a_corrupt_file(tmp_path):
+    """Under a write storm the file must always parse (no torn/half-written YAML)."""
+    import threading
+
+    base = [SourceConfig(id="a", type=SourceType.RSS, name="A", url="https://a.example/feed")]
+    config_store.write_sources(tmp_path, base)
+
+    errors: list[Exception] = []
+
+    def writer(n: int) -> None:
+        try:
+            for _ in range(5):
+                config_store.write_sources(
+                    tmp_path,
+                    [SourceConfig(id=f"s{n}", type=SourceType.RSS, name=str(n),
+                                  url="https://x.example/feed")],
+                )
+                load_sources(tmp_path)  # parse mid-storm; raises on a torn file
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=writer, args=(i,)) for i in range(16)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"torn/corrupt config observed: {errors[:3]}"
+    assert load_sources(tmp_path)  # final file is valid and non-empty

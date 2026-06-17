@@ -176,11 +176,72 @@ def test_trigger_run_calls_injected_fn(tmp_path):
     settings = Settings(sqlite_path=str(tmp_path / "db.sqlite"),
                         config_dir=str(cfg), output_dir=str(tmp_path / "out"))
     called = {"n": 0}
-    app = create_app(settings, run_digest_fn=lambda **kw: called.__setitem__("n", called["n"] + 1))
+    done = __import__("threading").Event()
+
+    def _run(**kw):
+        called["n"] += 1
+        done.set()
+
+    app = create_app(settings, run_digest_fn=_run)
     c = TestClient(app)
     r = c.post("/api/runs")
     assert r.status_code == 202
-    assert called["n"] == 1  # BackgroundTasks runs after response in TestClient
+    assert done.wait(timeout=5)  # run executes on a detached worker thread
+    assert called["n"] == 1
+
+
+def _runs_settings(tmp_path):
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "sources.yaml").write_text("sources: []\n", encoding="utf-8")
+    (cfg / "watchlist.yaml").write_text("entities: []\nkeywords: []\n", encoding="utf-8")
+    return Settings(sqlite_path=str(tmp_path / "db.sqlite"),
+                    config_dir=str(cfg), output_dir=str(tmp_path / "out"))
+
+
+def test_trigger_run_returns_run_id(tmp_path):
+    import threading
+
+    captured: dict = {}
+    done = threading.Event()
+
+    def _run(**kw):
+        captured.update(kw)
+        done.set()
+
+    app = create_app(_runs_settings(tmp_path), run_digest_fn=_run)
+    c = TestClient(app)
+    r = c.post("/api/runs")
+    assert r.status_code == 202
+    body = r.json()
+    assert body["status"] == "started"
+    assert isinstance(body["run_id"], str) and len(body["run_id"]) == 12
+    assert done.wait(timeout=5)
+    # The id returned to the client is the SAME one handed to run_digest.
+    assert captured["run_id"] == body["run_id"]
+
+
+def test_trigger_run_is_single_flight(tmp_path):
+    """A second trigger while one run is in flight gets 409, not a 2nd pipeline."""
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_run(**kw):
+        started.set()
+        release.wait(timeout=5)
+
+    app = create_app(_runs_settings(tmp_path), run_digest_fn=blocking_run)
+    client = TestClient(app)
+    # The run executes on a detached thread, so this returns 202 immediately
+    # while the run holds the single-flight lock.
+    first = client.post("/api/runs")
+    assert first.status_code == 202
+    assert started.wait(timeout=5), "first run never started"
+    # Second request arrives while the first still holds the lock.
+    assert client.post("/api/runs").status_code == 409
+    release.set()
 
 
 # ---------------------------------------------------------------------------
@@ -390,11 +451,23 @@ def test_mutating_routes_require_api_key_when_set(tmp_path):
     assert c.post("/api/runs", headers={"X-API-Key": "nope"}).status_code == 401
 
 
-def test_get_routes_open_even_with_api_key(tmp_path):
+def test_read_routes_require_api_key_when_set(tmp_path):
+    """When api_key is configured, EVERY route except /health requires it."""
     c = _auth_client(tmp_path, api_key="secret")
+    # /health stays public (liveness probe).
     assert c.get("/api/health").status_code == 200
-    assert c.get("/api/sources").status_code == 200
-    assert c.get("/api/watchlist").status_code == 200
+    # Reads now 401 without the key...
+    for path in ("/api/dashboard", "/api/runs", "/api/runs/r1", "/api/news",
+                 "/api/sources", "/api/watchlist"):
+        assert c.get(path).status_code == 401, path
+    # ...and succeed with it (404 for the missing run is still "authorized").
+    h = {"X-API-Key": "secret"}
+    assert c.get("/api/dashboard", headers=h).status_code == 200
+    assert c.get("/api/runs", headers=h).status_code == 200
+    assert c.get("/api/news", headers=h).status_code == 200
+    assert c.get("/api/sources", headers=h).status_code == 200
+    assert c.get("/api/watchlist", headers=h).status_code == 200
+    assert c.get("/api/runs/r1", headers=h).status_code == 404
 
 
 def test_auth_default_open_when_unset(tmp_path):

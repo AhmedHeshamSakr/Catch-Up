@@ -118,16 +118,12 @@ def parse_channel_feed(content: bytes) -> list[Video]:
 
 
 def get_transcript(video_id: str, settings: Settings, *, lang_pref: str | None = None) -> str | None:
-    """Fetch transcript for a YouTube video.
+    """Fetch transcript for a YouTube video via youtube-transcript-api.
 
-    Tries:
-    1. youtube-transcript-api (free, no download needed)
-    2. Whisper fallback via yt-dlp + faster-whisper (only if settings.youtube_whisper_enabled
-       and the whisper extra is installed — lazy import so the default env stays light).
-
-    Returns plain text or None if unavailable.
+    Free, no download needed. Returns plain text, or None if no transcript is
+    available (the caller handles a None transcript gracefully).
     """
-    # --- Attempt 1: youtube-transcript-api ---
+    # --- youtube-transcript-api ---
     try:
         from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore[import]
         from youtube_transcript_api._errors import (  # type: ignore[import]
@@ -155,10 +151,23 @@ def get_transcript(video_id: str, settings: Settings, *, lang_pref: str | None =
                 except Exception:
                     continue
             if transcript is None:
-                # Accept whatever is available
+                # No preferred-language transcript: fall back to whatever exists,
+                # but log WHICH language we settled on so a wrong-language summary
+                # is auditable rather than silently summarized as the target lang.
                 transcripts = list(transcript_list)
                 if transcripts:
                     transcript = transcripts[0]
+                    lang = (
+                        getattr(transcript, "language_code", None)
+                        or getattr(transcript, "language", None)
+                        or "?"
+                    )
+                    if lang not in langs:
+                        log.warning(
+                            "youtube %s: no preferred-language transcript "
+                            "(%s); summarizing %r transcript instead",
+                            video_id, langs, lang,
+                        )
             if transcript is not None:
                 fetched = transcript.fetch()
                 return " ".join(seg.text for seg in fetched).strip() or None
@@ -169,44 +178,6 @@ def get_transcript(video_id: str, settings: Settings, *, lang_pref: str | None =
             log.warning("youtube-transcript-api error for %s: %s", video_id, exc)
     except ImportError:
         log.debug("youtube-transcript-api not installed")
-
-    # --- Attempt 2: Whisper fallback ---
-    if settings.youtube_whisper_enabled:
-        try:
-            import yt_dlp  # type: ignore[import]
-            from faster_whisper import WhisperModel  # type: ignore[import]
-        except ImportError:
-            log.debug("Whisper extra not installed (yt-dlp / faster-whisper missing); skipping.")
-            return None
-
-        try:
-            import os
-            import tempfile
-
-            with tempfile.TemporaryDirectory() as tmpdir:
-                audio_path = os.path.join(tmpdir, f"{video_id}.mp3")
-                ydl_opts = {
-                    "format": "bestaudio/best",
-                    "outtmpl": audio_path,
-                    "quiet": True,
-                    "no_warnings": True,
-                    "postprocessors": [{
-                        "key": "FFmpegExtractAudio",
-                        "preferredcodec": "mp3",
-                    }],
-                }
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
-
-                model = WhisperModel(settings.whisper_model, device="cpu", compute_type="int8")
-                # yt-dlp may append .mp3 to the path
-                actual_path = audio_path if os.path.exists(audio_path) else audio_path + ".mp3"
-                segments, _ = model.transcribe(actual_path, beam_size=1)
-                text = " ".join(seg.text for seg in segments).strip()
-                return text or None
-        except Exception as exc:
-            log.debug("Whisper fallback failed for %s: %s", video_id, exc)
-            return None
 
     return None
 

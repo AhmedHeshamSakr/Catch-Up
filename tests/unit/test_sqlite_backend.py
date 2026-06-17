@@ -50,3 +50,15 @@ def test_init_schema_migrates_old_database(tmp_path):
 
     assert backend.list_news(category=Category.AI_TECH)[0].url == "https://a/1"
     assert backend.list_runs()[0].run_id == "r1"
+
+
+def test_conn_enables_wal_and_busy_timeout(tmp_path):
+    """WAL avoids reader/writer blocking; busy_timeout avoids instant SQLITE_BUSY."""
+    from app.adapters.storage.sqlite_backend import SqliteBackend
+
+    be = SqliteBackend(str(tmp_path / "t.db"))
+    be.init_schema()
+    with be._conn() as conn:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+        # >= 30000 confirms the explicit connect(timeout=30), not the ~5000 default.
+        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] >= 30000

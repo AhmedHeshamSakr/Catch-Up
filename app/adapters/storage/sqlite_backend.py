@@ -21,8 +21,13 @@ class SqliteBackend(StorageBackend):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path)
+        # timeout=30 sets busy_timeout=30000ms so a contending connection WAITS
+        # for a held lock instead of erroring SQLITE_BUSY immediately. WAL lets
+        # readers (the API endpoints) and the single writer (a background digest
+        # run) proceed concurrently instead of blocking each other.
+        conn = sqlite3.connect(self.path, timeout=30)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
     @staticmethod

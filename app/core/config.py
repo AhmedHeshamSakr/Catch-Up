@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import urlparse
 
 import yaml
 from pydantic import BaseModel, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from app.core.domain import Category, Importance, SourceType
 
@@ -67,8 +67,6 @@ class Settings(BaseSettings):
     # Deterministic generation for structured-output agents.
     llm_temperature: float = 0.0
     gnews_api_key: str = ""
-    youtube_whisper_enabled: bool = False
-    whisper_model: str = "base"
     critic_enabled: bool = True
     critic_min_importance: Importance = Importance.HIGH
     critic_check_watchlisted: bool = True
@@ -85,6 +83,19 @@ class Settings(BaseSettings):
     # Token-bucket rate limit for POST /runs and POST /sources/resolve.
     rate_limit_burst: int = 30
     rate_limit_refill_per_sec: float = 1.0
+    # CORS allowlist for the product API. Comma-separated in the ALLOW_ORIGINS
+    # env var (e.g. "https://a.example,https://b.example"); defaults to the
+    # local console origin.
+    # NoDecode: keep pydantic-settings from JSON-decoding the env value so the
+    # validator below can comma-split a plain "a,b,c" string.
+    allow_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
+
+    @field_validator("allow_origins", mode="before")
+    @classmethod
+    def _split_origins(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [o.strip() for o in value.split(",") if o.strip()]
+        return value
 
 
 def load_sources(config_dir: str | Path) -> list[SourceConfig]:

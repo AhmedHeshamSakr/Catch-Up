@@ -241,7 +241,10 @@ class ProcessingAgent(BaseAgent):
         watchlist = state["watchlist"]
 
         try:
-            batch_errors = process_items(
+            # Run the blocking LLM batch off the event loop so the loop stays
+            # responsive (and a run-level asyncio timeout can actually fire).
+            batch_errors = await asyncio.to_thread(
+                process_items,
                 items,
                 self.processor,
                 watchlist,
@@ -293,7 +296,9 @@ class GuardrailCriticAgent(BaseAgent):
                 if self.settings.critic_max_reflections > 0:
                     # Bounded self-correction: re-enrich critic-flagged items with
                     # feedback before withholding (falls back to apply_verdicts).
-                    outcome = reflect_and_correct(
+                    # Off the loop — it makes LLM critic + reprocess calls.
+                    outcome = await asyncio.to_thread(
+                        reflect_and_correct,
                         selected,
                         self.critic,
                         self.reprocessor,
@@ -302,7 +307,7 @@ class GuardrailCriticAgent(BaseAgent):
                     )
                 else:
                     # Reflection disabled → exactly the pre-batch path.
-                    verdicts = self.critic(selected)
+                    verdicts = await asyncio.to_thread(self.critic, selected)
                     outcome = apply_verdicts(
                         selected,
                         verdicts,
@@ -348,7 +353,10 @@ class DigestEditorAgent(BaseAgent):
         rendered = select_rendered(items)
 
         try:
-            run.narrative = self.narrator(rendered) if rendered else None
+            # Narration is an LLM call — run it off the event loop.
+            run.narrative = (
+                await asyncio.to_thread(self.narrator, rendered) if rendered else None
+            )
         except Exception as exc:
             run.source_errors.append(
                 {"stage": "narrative", "error": str(exc), "ts": _now()}

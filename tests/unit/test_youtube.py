@@ -281,3 +281,51 @@ def test_default_fetch_rejects_private_address():
 
     with pytest.raises(UnsafeURLError):
         yt._default_fetch(_CHANNEL_ID, resolver=lambda host: ["169.254.169.254"])
+
+
+# ---------------------------------------------------------------------------
+# get_transcript — language fallback
+# ---------------------------------------------------------------------------
+
+class _Seg:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _FakeTranscript:
+    def __init__(self, lang: str) -> None:
+        self.language_code = lang
+
+    def fetch(self):
+        return [_Seg("bonjour le monde")]
+
+
+class _FakeTranscriptList:
+    def __init__(self, transcripts):
+        self._t = transcripts
+
+    def find_transcript(self, langs):
+        raise Exception("no transcript for those languages")  # force the fallback
+
+    def __iter__(self):
+        return iter(self._t)
+
+
+class _FakeApi:
+    def list(self, video_id):
+        return _FakeTranscriptList([_FakeTranscript("fr")])
+
+
+def test_get_transcript_warns_when_falling_back_to_unpreferred_language(monkeypatch, caplog):
+    import logging
+
+    import youtube_transcript_api
+
+    monkeypatch.setattr(youtube_transcript_api, "YouTubeTranscriptApi", _FakeApi)
+    with caplog.at_level(logging.WARNING, logger="app.services.youtube"):
+        text = yt.get_transcript("vidFR", _SETTINGS)  # no preferred lang available
+    assert text == "bonjour le monde"  # still returns the fallback transcript
+    assert any(
+        "preferred-language" in r.message.lower() or "transcript instead" in r.message.lower()
+        for r in caplog.records
+    ), "expected a wrong-language warning"

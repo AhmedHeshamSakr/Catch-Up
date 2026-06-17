@@ -87,6 +87,14 @@ async def _run_tree_with_timeout(tree, run_id: str, timeout: float | None) -> No
 
     On timeout, ``asyncio.wait_for`` raises ``TimeoutError`` — caught by
     run_digest's FAILED-path so the run is finalized FAILED and re-raised.
+
+    SOFT cap: the LLM stages run their blocking calls via ``asyncio.to_thread``,
+    so the timeout fires on schedule (the loop stays responsive) and the run is
+    marked FAILED at the right wall-clock time — but ``asyncio.run`` waits for
+    the in-flight worker thread to finish before ``run_digest`` returns (Python
+    can't force-kill a thread). The hard per-call bound is ``llm_timeout`` inside
+    ``run_agent_text``. Any item mutated by a worker after cancellation is on the
+    FAILED path and never persisted (RenderAgent doesn't run), so it's discarded.
     """
     if timeout is None:
         await _run_tree(tree, run_id)
@@ -101,6 +109,8 @@ def run_digest(
     narrator=None,
     critic=None,
     reprocessor=None,
+    *,
+    run_id: str | None = None,
 ) -> DigestRun:
     # Deferred: app.pipeline.agents imports this module at top level, so
     # importing it here at module scope would reintroduce a load-time cycle.
@@ -108,7 +118,9 @@ def run_digest(
 
     settings = settings or Settings()
     storage = storage or build_storage(settings)
-    run_id = uuid.uuid4().hex[:12]
+    # Caller (e.g. POST /api/runs) may inject the run_id so it can be returned
+    # to the client before the run finishes; otherwise generate one.
+    run_id = run_id or uuid.uuid4().hex[:12]
     tree = build_pipeline(
         settings, storage,
         run_id=run_id,

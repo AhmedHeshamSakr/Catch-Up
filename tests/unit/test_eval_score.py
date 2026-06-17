@@ -195,6 +195,59 @@ def test_compare_small_drop_not_regression():
     assert "faithfulness" not in result["regressions"]
 
 
+def test_compare_safety_critical_pass_rate_drop_is_regression_even_when_mean_barely_moves():
+    """One new hallucination drops pass_rate below 1.0 while the mean moves <0.05.
+
+    The acceptance gate fails this (pass_rate < 1.0), so the regression check
+    must catch it too — a mean-only check would exit green and ship it.
+    """
+    dims = ["faithfulness", "category_accuracy", "importance_calibration", "ar_translation_quality"]
+    baseline = EvalReport(
+        n=35,
+        dimension_pass_rate=dict.fromkeys(dims, 1.0),
+        dimension_mean_score={d: (0.96 if d == "faithfulness" else 0.95) for d in dims},
+        dimension_min_score=dict.fromkeys(dims, 0.5),
+        passed=True,
+        failures=[],
+    )
+    candidate = EvalReport(
+        n=35,
+        dimension_pass_rate={d: (0.971 if d == "faithfulness" else 1.0) for d in dims},
+        dimension_mean_score={d: (0.933 if d == "faithfulness" else 0.95) for d in dims},
+        dimension_min_score=dict.fromkeys(dims, 0.0),
+        passed=False,
+        failures=["faithfulness"],
+    )
+    result = compare(baseline, candidate)
+    assert result["deltas"]["faithfulness"] > -0.05  # mean drop is sub-threshold
+    assert "faithfulness" in result["regressions"]  # but pass_rate drop is caught
+
+
+def test_compare_safety_critical_improvement_from_bad_baseline_not_regression():
+    """A pass_rate IMPROVEMENT is never a regression — even if the mean DIPPED.
+
+    pass_rate is the gating signal; the mean is only consulted when pass_rate is
+    unchanged. Here pass_rate rises 0.8->1.0 while the mean falls 0.96->0.90
+    (>0.05) — that must NOT be flagged, because the dimension genuinely improved.
+    """
+    dims = ["faithfulness", "category_accuracy", "importance_calibration", "ar_translation_quality"]
+    baseline = EvalReport(
+        n=10, dimension_pass_rate={d: (0.8 if d == "faithfulness" else 1.0) for d in dims},
+        dimension_mean_score={d: (0.96 if d == "faithfulness" else 0.95) for d in dims},
+        dimension_min_score=dict.fromkeys(dims, 0.5),
+        passed=False, failures=["faithfulness"],
+    )
+    candidate = EvalReport(
+        n=10, dimension_pass_rate=dict.fromkeys(dims, 1.0),
+        dimension_mean_score={d: (0.90 if d == "faithfulness" else 0.95) for d in dims},
+        dimension_min_score=dict.fromkeys(dims, 0.8),
+        passed=True, failures=[],
+    )
+    result = compare(baseline, candidate)
+    assert result["deltas"]["faithfulness"] < -0.05  # mean dropped past threshold
+    assert "faithfulness" not in result["regressions"]  # but pass_rate improved
+
+
 def test_compare_multiple_regressions():
     baseline = _report(faith=0.95, cat=0.90, imp=0.80, ar=0.90)
     candidate = _report(faith=0.80, cat=0.75, imp=0.80, ar=0.90)  # faith and cat regressed

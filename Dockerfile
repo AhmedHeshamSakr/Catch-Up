@@ -22,6 +22,10 @@ COPY ./pyproject.toml ./README.md ./uv.lock* ./
 
 COPY ./app ./app
 
+# The product /api/sources and /api/watchlist routes read/write config/*.yaml,
+# so the deployed container needs them.
+COPY ./config ./config
+
 RUN uv sync --frozen
 
 ARG COMMIT_SHA=""

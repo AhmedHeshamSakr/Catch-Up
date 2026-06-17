@@ -35,16 +35,20 @@ from fastapi import FastAPI
 from google.adk.cli.fast_api import get_fast_api_app
 from google.cloud import logging as google_cloud_logging
 
+from app.api.app import register_product_routes
 from app.app_utils.telemetry import setup_telemetry
 from app.app_utils.typing import Feedback
+from app.core.config import Settings
 
 setup_telemetry()
 _, project_id = google.auth.default()
 logging_client = google_cloud_logging.Client()
 logger = logging_client.logger(__name__)
-allow_origins = (
-    os.getenv("ALLOW_ORIGINS", "").split(",") if os.getenv("ALLOW_ORIGINS") else None
-)
+# Single source of truth for CORS origins: Settings.allow_origins (ALLOW_ORIGINS
+# env, comma-split, trimmed). Passed to get_fast_api_app so ADK's CORS AND its
+# origin-check middleware both honor the same allowlist as the product API.
+_settings = Settings()
+allow_origins = _settings.allow_origins or None
 
 # Artifact bucket for ADK (created by Terraform, passed via env var)
 logs_bucket_name = os.environ.get("LOGS_BUCKET_NAME")
@@ -65,6 +69,12 @@ app: FastAPI = get_fast_api_app(
 )
 app.title = "catch-up"
 app.description = "API for interacting with the Agent catch-up"
+
+# Serve the product /api/* routes from this SAME deployed container so a
+# deployed Next.js console (lib/api.ts -> /api/*) reaches a real backend.
+# No extra CORSMiddleware: ADK's get_fast_api_app already installed CORS +
+# origin-check with the same allow_origins above.
+register_product_routes(app, _settings)
 
 
 @app.post("/feedback")
