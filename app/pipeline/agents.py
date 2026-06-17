@@ -150,7 +150,7 @@ def _items_delta(items: list[NewsItem]) -> dict:
 # ---------------------------------------------------------------------------
 
 class PipelineInitAgent(BaseAgent):
-    """Seeds DigestRun and watchlist into session state."""
+    """Creates the DigestRun and seeds it (with run_id) via state_delta."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
@@ -166,17 +166,14 @@ class PipelineInitAgent(BaseAgent):
             import uuid
 
             run_id = uuid.uuid4().hex[:12]
-            state["run_id"] = run_id
         run = DigestRun(run_id=run_id)
         self.storage.create_run(run)
 
-        wl = load_watchlist(self.settings.config_dir)
-
-        state["run"] = run
-        state["watchlist"] = wl
-        state["settings"] = self.settings
-
-        yield _make_event(ctx, self.name)
+        # settings/storage are constructor-injected; watchlist is injected into the
+        # stages that need it (Processing/Critic). Seed only durable, JSON-
+        # serializable run state. run_id always travels in the delta (no direct
+        # state mutation) so it persists under a persistent session service.
+        yield _make_event(ctx, self.name, {"run_id": run_id, **_run_delta(run)})
 
 
 # ---------------------------------------------------------------------------
@@ -481,9 +478,7 @@ def build_pipeline(
     _reprocessor = reprocessor or _default_reprocessor(settings)
 
     # Watchlist is config, not run state: load it once here and inject it into
-    # the stages that need it (Critic now; Processing in the next migration step)
-    # instead of seeding the session. PipelineInit still seeds state["watchlist"]
-    # for the not-yet-injected consumers until that seed is removed.
+    # the stages that need it (Processing + Critic) instead of seeding the session.
     watchlist = load_watchlist(settings.config_dir)
 
     # Build one collector per collected SourceType from the shared

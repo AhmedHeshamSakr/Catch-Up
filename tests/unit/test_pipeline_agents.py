@@ -137,7 +137,7 @@ async def _run(agent, state: dict) -> list:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_pipeline_init_seeds_run_and_watchlist(tmp_path):
+async def test_pipeline_init_emits_run_delta_no_object_seeds(tmp_path):
     settings = _settings(tmp_path)
     storage = _storage(tmp_path)
 
@@ -147,16 +147,37 @@ async def test_pipeline_init_seeds_run_and_watchlist(tmp_path):
     events = await _run(agent, state)
 
     assert len(events) == 1
-    assert isinstance(state["run"], DigestRun)
-    assert state["run"].run_id == "abc123"
-    assert state["run"].status == RunStatus.RUNNING
-    assert isinstance(state["watchlist"], Watchlist)
-    assert state["settings"] is settings
+    delta = events[-1].actions.state_delta
+    assert delta["run_id"] == "abc123"
+    assert delta["run"]["run_id"] == "abc123"
+    assert delta["run"]["status"] == "running"
+    # The delta-applied state holds JSON, not a live DigestRun object.
+    assert isinstance(state["run"], dict)
+    # settings/storage/watchlist are constructor-injected, never seeded into state.
+    assert "settings" not in delta and "watchlist" not in delta
+    assert "settings" not in state and "watchlist" not in state
 
     # Run must be persisted in storage
     saved = storage.get_run("abc123")
     assert saved is not None
     assert saved.run_id == "abc123"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_init_generates_run_id_when_absent(tmp_path):
+    settings = _settings(tmp_path)
+    storage = _storage(tmp_path)
+
+    agent = PipelineInitAgent(name="PipelineInit", settings=settings, storage=storage)
+    state: dict = {}  # no run_id seeded
+
+    events = await _run(agent, state)
+
+    delta = events[-1].actions.state_delta
+    # A run_id is generated and travels in the delta (no direct state mutation).
+    assert delta["run_id"]
+    assert delta["run"]["run_id"] == delta["run_id"]
+    assert storage.get_run(delta["run_id"]) is not None
 
 
 @pytest.mark.asyncio
