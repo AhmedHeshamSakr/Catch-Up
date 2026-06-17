@@ -815,9 +815,9 @@ git commit -m "feat(runner): run pipeline via Runner + persistent session servic
 - Modify: `tests/integration/test_pipeline_persistent_session.py`
 - Create: `tests/integration/test_run_digest_database_session.py`
 
-- [ ] **Step 1: Flip the portability test**
+- [ ] **Step 1: Flip the portability test + add the reload guard**
 
-In `tests/integration/test_pipeline_persistent_session.py`, the run is now expected to SUCCEED. Replace the `try/except → pytest.xfail(...)` block (lines ~135–150) with a plain assertion path (no xfail):
+In `tests/integration/test_pipeline_persistent_session.py`, the run is now expected to SUCCEED. Replace the `try/except → pytest.xfail(...)` block (lines ~135–150) with a plain assertion path (no xfail) **and add the reload assertion** — the genuine migration guard. (Verified during execution: within a single `run_async`, `DatabaseSessionService` holds the session in memory so even direct mutation "works"; the gap only shows on RELOAD, where only `state_delta`-persisted keys survive. With direct mutation a reload shows just `run_id`; after the migration it must show `run`.)
 ```python
     async for _ in runner.run_async(
         user_id="system", session_id=session.id, new_message=msg
@@ -828,8 +828,19 @@ In `tests/integration/test_pipeline_persistent_session.py`, the run is now expec
     assert run.status == RunStatus.SUCCESS
     assert run.collected == 1
     assert run.new == 1
+
+    # Genuine durability guard: reload the session via a FRESH service instance
+    # (forces a DB read). Only state_delta-persisted values survive a reload, so
+    # this fails for direct ctx.session.state mutation and passes once the tree
+    # is fully delta-driven.
+    reloaded = await DatabaseSessionService(db_url=_db_url(tmp_path)).get_session(
+        app_name="catchup", user_id="system", session_id=session.id
+    )
+    assert "run" in reloaded.state
+    assert reloaded.state["run"]["run_id"] == run_id
+    assert reloaded.state["run"]["status"] == "success"
 ```
-Keep the `_service_runnable` skip guard (it should no longer skip now that `greenlet` is a runtime dep, but it stays as a safety net for exotic environments). Update the module docstring to say the tree IS portable (delta-driven) and this test proves it.
+Keep the `_service_runnable` skip guard (it should no longer skip now that `greenlet` is a runtime dep, but it stays as a safety net for exotic environments). Update the module docstring to say the tree IS portable (delta-driven) and this test proves it via the reload assertion.
 
 - [ ] **Step 2: Run it (should PASS now, not xfail)**
 

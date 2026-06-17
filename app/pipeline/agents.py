@@ -1,17 +1,18 @@
 """ADK agent wrappers for the NewsCatchUp pipeline.
 
 Each wrapper is a thin BaseAgent subclass that reads state from
-ctx.session.state, calls the existing proven functions, and writes
-results back to state. No LLM calls — all orchestration logic only.
+ctx.session.state, calls the existing proven functions, and writes results
+back via EventActions.state_delta. No LLM calls — all orchestration only.
 
-State-propagation decision: the pipeline runs against a single in-process
-session (InMemoryRunner / InMemorySessionService), so agents mutate
-``ctx.session.state`` directly and emit a plain terminal Event with no
-``EventActions.state_delta``. This is intentional — the empty state_delta the
-runner would persist is dead plumbing here. When a persistent/distributed
-session service (Firestore / Vertex Agent Engine — Plan 9) is introduced,
-durable values that must survive across processes will need to move into
-``state_delta`` so the session service persists them.
+State-propagation: every cross-stage value travels via
+``EventActions.state_delta`` as JSON-serializable data (run/items/raws as
+``model_dump`` dicts). settings, storage and the watchlist are
+constructor-injected, never stored in the session. This makes the tree correct
+under a persistent session service (DatabaseSessionService) — only
+``state_delta`` survives a session reload, so direct ``ctx.session.state``
+mutation would be lost across processes. The ``_read_*`` helpers stay tolerant
+of a live object OR a dict so the migration could land stage-by-stage.
+See docs/superpowers/specs/2026-06-17-durable-session-state-design.md.
 """
 from __future__ import annotations
 
@@ -23,10 +24,18 @@ from typing import TYPE_CHECKING, Any
 from google.adk.agents import ParallelAgent, SequentialAgent
 from google.adk.agents.base_agent import BaseAgent
 from google.adk.events.event import Event
+from google.adk.events.event_actions import EventActions
 from pydantic import ConfigDict
 
 from app.core.config import Settings, load_sources
-from app.core.domain import DigestRun, Importance, NewsItem, RunStatus, SourceType
+from app.core.domain import (
+    DigestRun,
+    Importance,
+    NewsItem,
+    RawItem,
+    RunStatus,
+    SourceType,
+)
 from app.core.ports.storage import StorageBackend
 from app.pipeline.critic import (
     apply_verdicts,
@@ -91,18 +100,49 @@ def _now_dt() -> datetime:
     return datetime.now(UTC)
 
 
-def _make_event(ctx: Any, author: str) -> Event:
-    """Build a minimal terminal pipeline event.
+def _make_event(ctx: Any, author: str, state_delta: dict | None = None) -> Event:
+    """Build a terminal pipeline event.
 
-    Agents mutate ``ctx.session.state`` directly (single in-process session),
-    so no ``EventActions.state_delta`` is attached — see the module docstring
-    for the durable-session migration note.
+    Durable cross-stage values travel via ``EventActions.state_delta`` so the
+    pipeline is correct under a persistent session service (the runner applies
+    each event's delta to the session before the next agent runs). Pass the keys
+    this stage changed; omit for a stage that changes nothing.
     """
     return Event(
         invocation_id=ctx.invocation_id,
         author=author,
         branch=ctx.branch,
+        actions=EventActions(state_delta=state_delta or {}),
     )
+
+
+def _read_run(state: Any) -> DigestRun:
+    """Read the run from state, tolerant of either a JSON dict (persistent /
+    post-migration) or a live DigestRun (in-process / pre-migration)."""
+    r = state["run"]
+    return DigestRun.model_validate(r) if isinstance(r, dict) else r
+
+
+def _read_items(state: Any) -> list[NewsItem]:
+    return [
+        NewsItem.model_validate(x) if isinstance(x, dict) else x
+        for x in (state.get("items") or [])
+    ]
+
+
+def _read_raws(state: Any, key: str) -> list[RawItem]:
+    return [
+        RawItem.model_validate(x) if isinstance(x, dict) else x
+        for x in (state.get(key) or [])
+    ]
+
+
+def _run_delta(run: DigestRun) -> dict:
+    return {"run": run.model_dump(mode="json")}
+
+
+def _items_delta(items: list[NewsItem]) -> dict:
+    return {"items": [i.model_dump(mode="json") for i in items]}
 
 
 # ---------------------------------------------------------------------------
@@ -202,12 +242,12 @@ class NormalizeDedupAgent(BaseAgent):
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
         state = ctx.session.state
-        run: DigestRun = state["run"]
+        run = _read_run(state)
 
         all_raws = []
         for source_type in COLLECTED_SOURCE_TYPES:
             key = state_key_for(source_type)
-            all_raws.extend(state.get(key) or [])
+            all_raws.extend(_read_raws(state, key))
             # Merge per-source collector errors (safe: this stage is single-threaded).
             run.source_errors.extend(state.get(f"errors_{key}") or [])
 
@@ -236,8 +276,8 @@ class ProcessingAgent(BaseAgent):
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
         state = ctx.session.state
-        run: DigestRun = state["run"]
-        items: list[NewsItem] = state.get("items") or []
+        run = _read_run(state)
+        items = _read_items(state)
         watchlist = state["watchlist"]
 
         try:
@@ -286,8 +326,8 @@ class GuardrailCriticAgent(BaseAgent):
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
         state = ctx.session.state
-        run: DigestRun = state["run"]
-        items: list[NewsItem] = state.get("items") or []
+        run = _read_run(state)
+        items = _read_items(state)
         watchlist = state["watchlist"]
 
         selected = select_for_critique(items, watchlist, self.settings)
@@ -348,8 +388,8 @@ class DigestEditorAgent(BaseAgent):
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
         state = ctx.session.state
-        run: DigestRun = state["run"]
-        items: list[NewsItem] = state.get("items") or []
+        run = _read_run(state)
+        items = _read_items(state)
         rendered = select_rendered(items)
 
         try:
@@ -383,8 +423,8 @@ class RenderAgent(BaseAgent):
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
         state = ctx.session.state
-        run: DigestRun = state["run"]
-        items: list[NewsItem] = state.get("items") or []
+        run = _read_run(state)
+        items = _read_items(state)
 
         run.processed = sum(1 for i in items if i.status == "processed")
         run.high_importance = sum(1 for i in items if i.importance == Importance.HIGH)

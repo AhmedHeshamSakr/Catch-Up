@@ -114,9 +114,20 @@ def _storage(tmp_path) -> SqliteBackend:
 
 
 async def _run(agent, state: dict) -> list:
-    """Drive an agent's _run_async_impl with a fake ctx, collect events."""
+    """Drive an agent's _run_async_impl with a fake ctx, collect events, and
+    apply any EventActions.state_delta to ``state`` in place — mimicking the ADK
+    Runner so a single-agent unit test stays valid as stages move from direct
+    state mutation to state_delta.
+
+    NB: a flat dict.update() is faithful ONLY for this pipeline's unprefixed
+    keys. It does NOT model ADK's 'temp:'/'user:'/'app:' prefix semantics."""
     ctx = _ctx(state)
-    return [e async for e in agent._run_async_impl(ctx)]
+    events = []
+    async for e in agent._run_async_impl(ctx):
+        events.append(e)
+        if e.actions and e.actions.state_delta:
+            state.update(e.actions.state_delta)
+    return events
 
 
 # ---------------------------------------------------------------------------
