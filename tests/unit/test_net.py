@@ -1,6 +1,8 @@
+import httpx
 import pytest
 
-from app.services.net import UnsafeURLError, is_http_url, validate_public_url
+from app.services import net
+from app.services.net import UnsafeURLError, is_http_url, safe_get, validate_public_url
 
 
 def _resolver(ips):
@@ -23,10 +25,78 @@ def test_rejects_loopback_and_private():
             validate_public_url("http://internal.example", resolver=_resolver([ip]))
 
 
-def test_allows_public_host():
-    assert validate_public_url(
+def test_allows_public_host_and_returns_pinned_ip():
+    url, ip = validate_public_url(
         "https://news.example.com/feed", resolver=_resolver(["93.184.216.34"])
-    ) == "https://news.example.com/feed"
+    )
+    assert url == "https://news.example.com/feed"
+    assert ip == "93.184.216.34"  # returns the IP to pin the connection to
+
+
+def test_safe_get_connects_to_the_validated_ip_not_a_reresolved_one(monkeypatch):
+    # resolver returns a public IP; if the code re-resolved via the hostname at
+    # connect time it could hit a DIFFERENT (attacker) IP. Pinning proves it doesn't.
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url_host"] = request.url.host
+        seen["host_header"] = request.headers.get("host")
+        seen["sni"] = request.extensions.get("sni_hostname")
+        return httpx.Response(200, text="ok")
+
+    real_client = httpx.Client
+
+    def fake_client(**kwargs):
+        kwargs.pop("transport", None)
+        return real_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(net.httpx, "Client", fake_client)
+    resp = safe_get("https://example.com/x", resolver=_resolver(["93.184.216.34"]))
+    assert resp.status_code == 200
+    assert seen["url_host"] == "93.184.216.34"   # connected to the pinned IP
+    assert seen["host_header"] == "example.com"  # original Host preserved
+    assert seen["sni"] == "example.com"          # TLS SNI = real hostname
+
+
+def _mock_client_factory(handler):
+    real_client = httpx.Client
+
+    def fake_client(**kwargs):
+        kwargs.pop("transport", None)
+        return real_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    return fake_client
+
+
+def test_safe_get_brackets_ipv6_host_header(monkeypatch):
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["host"] = request.headers.get("host")
+        return httpx.Response(200, text="ok")
+
+    monkeypatch.setattr(net.httpx, "Client", _mock_client_factory(handler))
+    ip6 = "2606:2800:220:1:248:1893:25c8:1946"
+    safe_get(f"https://[{ip6}]:8443/x", resolver=_resolver([ip6]))
+    assert seen["host"] == f"[{ip6}]:8443"  # IPv6 literal bracketed, port kept
+
+
+def test_safe_get_strips_caller_supplied_host_header(monkeypatch):
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["host"] = request.headers.get("host")
+        seen["host_count"] = sum(1 for k, _ in request.headers.raw if k.lower() == b"host")
+        return httpx.Response(200, text="ok")
+
+    monkeypatch.setattr(net.httpx, "Client", _mock_client_factory(handler))
+    safe_get(
+        "https://example.com/x",
+        resolver=_resolver(["93.184.216.34"]),
+        headers={"host": "evil.example"},
+    )
+    assert seen["host"] == "example.com"  # caller's host overridden, not duplicated
+    assert seen["host_count"] == 1
 
 
 def test_rejects_empty_resolution():
