@@ -61,21 +61,23 @@ def _rate_limiter(bucket: TokenBucket):
     return dep
 
 
-def create_app(
-    settings: Settings | None = None,
+def register_product_routes(
+    app: FastAPI,
+    settings: Settings,
     *,
     run_digest_fn: Callable[..., object] = run_digest,
     resolve_channel_id_fn: Callable[..., object] = youtube_resolve.resolve_channel_id,
     discover_feed_fn: Callable[..., object] = feed_discovery.discover_feed,
-) -> FastAPI:
-    settings = settings or Settings()
-    app = FastAPI(title="Catch-Up API", version="0.1.0")
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["http://localhost:3000"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+) -> None:
+    """Attach the product /api/* routes to an existing app (CORS NOT added here).
+
+    Shared by ``create_app()`` (the ``catchup serve`` standalone API) and
+    ``app/fast_api_app.py`` (so the deployed ADK container ALSO serves /api/*).
+    CORS is the caller's responsibility: ``create_app`` adds its own
+    ``CORSMiddleware``; the ADK deploy app passes ``settings.allow_origins`` to
+    ``get_fast_api_app``, whose CORS + origin-check middleware already wrap these
+    routes — adding a second ``CORSMiddleware`` here would duplicate CORS headers.
+    """
     api = APIRouter(prefix="/api")
 
     # Shared, per-process limiter for the expensive endpoints (/runs, /resolve).
@@ -186,4 +188,28 @@ def create_app(
             raise HTTPException(status_code=400, detail="resolve is not supported for this source type")
 
     app.include_router(api)
+
+
+def create_app(
+    settings: Settings | None = None,
+    *,
+    run_digest_fn: Callable[..., object] = run_digest,
+    resolve_channel_id_fn: Callable[..., object] = youtube_resolve.resolve_channel_id,
+    discover_feed_fn: Callable[..., object] = feed_discovery.discover_feed,
+) -> FastAPI:
+    """Standalone product API (run by ``catchup serve``)."""
+    settings = settings or Settings()
+    app = FastAPI(title="Catch-Up API", version="0.1.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.allow_origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    register_product_routes(
+        app, settings,
+        run_digest_fn=run_digest_fn,
+        resolve_channel_id_fn=resolve_channel_id_fn,
+        discover_feed_fn=discover_feed_fn,
+    )
     return app
