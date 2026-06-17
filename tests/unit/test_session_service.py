@@ -30,3 +30,12 @@ def test_make_database_backend(tmp_path):
         sqlite_path=str(tmp_path / "catchup.db"),
     )
     assert isinstance(make_session_service(s), DatabaseSessionService)
+
+
+def test_run_tree_uses_injected_session_service():
+    import inspect
+
+    from app import runner
+
+    sig = inspect.signature(runner._run_tree)
+    assert "session_service" in sig.parameters

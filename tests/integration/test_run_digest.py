@@ -160,7 +160,7 @@ def test_run_digest_times_out_finalizes_failed(tmp_path, monkeypatch):
 
     # Slow tree: create the run (so the FAILED path can find+finalize it),
     # then sleep well past run_timeout so asyncio.wait_for fires.
-    async def slow_run_tree(tree, run_id):
+    async def slow_run_tree(tree, run_id, session_service):
         from app.core.domain import DigestRun
         storage.create_run(DigestRun(run_id=run_id))
         await asyncio.sleep(5.0)
