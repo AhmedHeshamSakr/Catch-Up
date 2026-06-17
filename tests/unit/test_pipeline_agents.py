@@ -33,6 +33,7 @@ from app.pipeline.agents import (
     RenderAgent,
     SourceCollectorAgent,
     _read_items,
+    _read_raws,
     build_pipeline,
 )
 from app.pipeline.eval_schema import FaithfulnessVerdict
@@ -198,8 +199,9 @@ async def test_source_collector_writes_raws_for_matching_type(tmp_path):
 
     assert len(events) == 1
     # rss-src matches; api-src does not; disabled-src skipped
-    assert len(state["raws_rss"]) == 1
-    assert state["raws_rss"][0].url == "https://x.com/rss-src"
+    raws = _read_raws(state, "raws_rss")
+    assert len(raws) == 1
+    assert raws[0].url == "https://x.com/rss-src"
 
 
 @pytest.mark.asyncio
@@ -298,6 +300,25 @@ async def test_source_collector_different_types_use_distinct_keys(tmp_path):
     assert "raws_api" in state
     assert len(state["raws_api"]) == 1
     assert "raws_rss" not in state
+
+
+@pytest.mark.asyncio
+async def test_collector_emits_raws_delta_as_dicts(tmp_path):
+    settings = _settings(tmp_path)
+    storage = _storage(tmp_path)
+    state: dict = {}
+
+    agent = SourceCollectorAgent(
+        name="CollectRss", source_type=SourceType.RSS, state_key="raws_rss",
+        settings=settings, storage=storage,
+        collect_fn=lambda src, s, st=None: [_raw("https://x/1", "T")],
+    )
+    events = await _run(agent, state)
+
+    delta = events[-1].actions.state_delta
+    assert isinstance(delta["raws_rss"], list) and isinstance(delta["raws_rss"][0], dict)
+    assert delta["raws_rss"][0]["url"] == "https://x/1"
+    assert delta["errors_raws_rss"] == []
 
 
 # ---------------------------------------------------------------------------

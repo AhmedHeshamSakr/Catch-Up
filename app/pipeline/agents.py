@@ -197,7 +197,7 @@ class SourceCollectorAgent(BaseAgent):
     async def _run_async_impl(
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
-        state = ctx.session.state
+        # Reads only config (load_sources); writes its own keys via state_delta.
         raws = []
         errors: list[dict] = []
 
@@ -218,12 +218,16 @@ class SourceCollectorAgent(BaseAgent):
                     {"source_id": source.id, "error": str(exc), "ts": _now()}
                 )
 
-        # Each parallel collector writes ONLY its own keys; NormalizeDedup
-        # merges the per-source errors into run.source_errors single-threaded.
-        state[self.state_key] = raws
-        state[f"errors_{self.state_key}"] = errors
-
-        yield _make_event(ctx, self.name)
+        # Each parallel collector writes ONLY its own keys via state_delta;
+        # NormalizeDedup merges the per-source errors into run.source_errors.
+        # Distinct keys per branch → ADK's parallel state merge is conflict-free.
+        yield _make_event(
+            ctx, self.name,
+            {
+                self.state_key: [r.model_dump(mode="json") for r in raws],
+                f"errors_{self.state_key}": errors,
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
