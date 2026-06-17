@@ -55,7 +55,7 @@ from app.runner import (
 from app.services import normalize as normalize_svc
 from app.services.render import excel, markdown
 from app.services.render import html as html_render
-from app.services.watchlist import load_watchlist
+from app.services.watchlist import Watchlist, load_watchlist
 
 if TYPE_CHECKING:
     from google.adk.agents.invocation_context import InvocationContext
@@ -321,6 +321,7 @@ class GuardrailCriticAgent(BaseAgent):
     storage: StorageBackend
     critic: Callable
     reprocessor: Callable
+    watchlist: Watchlist
 
     async def _run_async_impl(
         self, ctx: InvocationContext
@@ -328,7 +329,7 @@ class GuardrailCriticAgent(BaseAgent):
         state = ctx.session.state
         run = _read_run(state)
         items = _read_items(state)
-        watchlist = state["watchlist"]
+        watchlist = self.watchlist
 
         selected = select_for_critique(items, watchlist, self.settings)
         try:
@@ -368,7 +369,7 @@ class GuardrailCriticAgent(BaseAgent):
                     redact_unfaithful(item)
                 run.flagged = len(selected)
 
-        yield _make_event(ctx, self.name)
+        yield _make_event(ctx, self.name, {**_run_delta(run), **_items_delta(items)})
 
 
 # ---------------------------------------------------------------------------
@@ -475,6 +476,12 @@ def build_pipeline(
     _critic = critic or _default_critic(settings)
     _reprocessor = reprocessor or _default_reprocessor(settings)
 
+    # Watchlist is config, not run state: load it once here and inject it into
+    # the stages that need it (Critic now; Processing in the next migration step)
+    # instead of seeding the session. PipelineInit still seeds state["watchlist"]
+    # for the not-yet-injected consumers until that seed is removed.
+    watchlist = load_watchlist(settings.config_dir)
+
     # Build one collector per collected SourceType from the shared
     # source-of-truth, so the node keys and the NormalizeDedup merge keys can
     # never drift apart. Names preserve the existing literals (CollectRss …).
@@ -519,6 +526,7 @@ def build_pipeline(
                 storage=storage,
                 critic=_critic,
                 reprocessor=_reprocessor,
+                watchlist=watchlist,
             ),
             DigestEditorAgent(
                 name="DigestEditor",

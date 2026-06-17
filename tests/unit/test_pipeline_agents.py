@@ -485,6 +485,7 @@ async def test_guardrail_critic_flags_unfaithful_item(tmp_path):
         storage=storage,
         critic=fake_critic,
         reprocessor=_fake_reprocessor,
+        watchlist=Watchlist(),
     )
     await _run(agent, state)
 
@@ -520,6 +521,7 @@ async def test_guardrail_critic_faithful_item_untouched(tmp_path):
         storage=storage,
         critic=fake_critic,
         reprocessor=_fake_reprocessor,
+        watchlist=Watchlist(),
     )
     await _run(agent, state)
 
@@ -555,6 +557,7 @@ async def test_guardrail_critic_raises_adds_stage_error(tmp_path):
         storage=storage,
         critic=boom_critic,
         reprocessor=_fake_reprocessor,
+        watchlist=Watchlist(),
     )
     events = await _run(agent, state)
 
@@ -593,10 +596,45 @@ async def test_guardrail_critic_disabled_skips_selection(tmp_path):
         storage=storage,
         critic=tracking_critic,
         reprocessor=_fake_reprocessor,
+        watchlist=Watchlist(),
     )
     await _run(agent, state)
 
     assert critic_called == []  # critic_enabled=False → nothing selected → critic not called
+
+
+@pytest.mark.asyncio
+async def test_critic_emits_run_and_items_delta_using_injected_watchlist(tmp_path):
+    settings = _settings(tmp_path, critic_enabled=True, critic_action="downrank",
+                         critic_min_importance="high")
+    storage = _storage(tmp_path)
+
+    item = _news("https://a.com/1", "Test")
+    item.importance = Importance.HIGH
+    item.importance_score = 0.9
+    item.status = "processed"
+
+    run = DigestRun(run_id="r1")
+    # No "watchlist" key in state — the agent must use its injected watchlist.
+    state = {"run": run, "items": [item]}
+
+    def fake_critic(items):
+        return [FaithfulnessVerdict(item_id=items[0].id, faithful=False, issues=["x"])]
+
+    agent = GuardrailCriticAgent(
+        name="GuardrailCritic", settings=settings, storage=storage,
+        critic=fake_critic, reprocessor=_fake_reprocessor,
+        watchlist=Watchlist(),
+    )
+    events = await _run(agent, state)
+
+    delta = events[-1].actions.state_delta
+    assert "run" in delta and "items" in delta
+    assert isinstance(delta["items"], list) and isinstance(delta["items"][0], dict)
+    assert delta["run"]["flagged"] == 1
+    # The SERIALIZED item is the one the critic mutated (downrank → flagged),
+    # proving _read_items copies are what get re-serialized in the delta.
+    assert delta["items"][0]["status"] == "flagged"
 
 
 # ---------------------------------------------------------------------------
