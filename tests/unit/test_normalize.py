@@ -50,3 +50,34 @@ def test_image_url_carries_through_normalize_and_storage_roundtrip(storage):
     storage.save_items(out)
     loaded = storage.get_items_for_run("r1")
     assert loaded[0].image_url == "https://img.a.com/t.jpg"
+
+
+def _raw_src(source_id: str, url: str, title: str) -> RawItem:
+    return RawItem(
+        source_id=source_id, source_type=SourceType.RSS, source_name="S",
+        url=url, title=title,
+    )
+
+
+def test_same_title_from_different_sources_is_kept(storage):
+    """Distinct sources sharing a generic headline must NOT be collapsed."""
+    raws = [
+        _raw_src("src-a", "https://a.example/1", "Market Update"),
+        _raw_src("src-b", "https://b.example/2", "Market Update"),
+    ]
+    out = normalize.normalize_and_dedup(raws, storage, run_id="r1")
+    assert {i.url for i in out} == {"https://a.example/1", "https://b.example/2"}
+
+
+def test_same_title_same_source_is_collapsed_and_logged(storage, caplog):
+    """A repeat headline within ONE source is collapsed, and the drop is logged."""
+    import logging
+
+    raws = [
+        _raw_src("src-a", "https://a.example/1", "Daily Brief"),
+        _raw_src("src-a", "https://a.example/2", "daily   brief"),  # same title, same source
+    ]
+    with caplog.at_level(logging.INFO, logger="app.services.normalize"):
+        out = normalize.normalize_and_dedup(raws, storage, run_id="r1")
+    assert len(out) == 1
+    assert any("dedup" in r.message.lower() for r in caplog.records)
