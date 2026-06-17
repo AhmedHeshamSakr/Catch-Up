@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     # execution is wrapped in asyncio.wait_for so a stuck stage can't hang the
     # run forever; on timeout the run finalizes FAILED and the error re-raises.
     run_timeout: float | None = None
+    # ADK session persistence. "database" (default) = persistent
+    # DatabaseSessionService (SQLite via aiosqlite) so a run's session survives a
+    # restart and the tree is portable to any persistent service. "memory" =
+    # in-process InMemorySessionService (fast tests / ephemeral runs).
+    session_backend: Literal["database", "memory"] = "database"
+    # Session store URL. Empty => derive a local SQLite file next to sqlite_path:
+    #   sqlite+aiosqlite:///<dir of sqlite_path>/sessions.db
+    # Set explicitly to point at another backend later (e.g. postgresql+asyncpg://).
+    session_db_url: str = ""
     # Deterministic generation for structured-output agents.
     llm_temperature: float = 0.0
     gnews_api_key: str = ""

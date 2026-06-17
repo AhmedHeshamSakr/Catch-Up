@@ -53,3 +53,19 @@ def test_allow_origins_parses_comma_separated_env(monkeypatch):
 def test_allow_origins_defaults_to_localhost(monkeypatch):
     monkeypatch.delenv("ALLOW_ORIGINS", raising=False)
     assert Settings(_env_file=None).allow_origins == ["http://localhost:3000"]
+
+
+def test_session_defaults(monkeypatch):
+    # Clear so the conftest's suite-wide SESSION_BACKEND=memory (and any CI env)
+    # doesn't mask the real field defaults.
+    monkeypatch.delenv("SESSION_BACKEND", raising=False)
+    monkeypatch.delenv("SESSION_DB_URL", raising=False)
+    s = Settings(_env_file=None)
+    assert s.session_backend == "database"
+    assert s.session_db_url == ""
+
+
+def test_greenlet_and_aiosqlite_importable():
+    # DatabaseSessionService's async SQLite engine needs both at runtime.
+    import aiosqlite  # noqa: F401
+    import greenlet  # noqa: F401
