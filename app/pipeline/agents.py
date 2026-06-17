@@ -441,7 +441,7 @@ class RenderAgent(BaseAgent):
         run.finished_at = _now_dt()
         self.storage.finalize_run(run)
 
-        yield _make_event(ctx, self.name)
+        yield _make_event(ctx, self.name, _run_delta(run))
 
 
 # ---------------------------------------------------------------------------

@@ -800,6 +800,32 @@ async def test_render_agent_excludes_flagged_from_render(tmp_path):
     assert "Hallucinated summary." not in md
 
 
+@pytest.mark.asyncio
+async def test_render_emits_run_delta(tmp_path):
+    settings = _settings(tmp_path)
+    storage = _storage(tmp_path)
+
+    item = _news("https://a.com/1", "OpenAI article")
+    item.status = "processed"
+    item.summary_en = "A summary."
+
+    run = DigestRun(run_id="r1")
+    storage.create_run(run)
+    state = {"run": run, "watchlist": Watchlist(), "items": [item]}
+
+    agent = RenderAgent(name="Render", settings=settings, storage=storage)
+    events = await _run(agent, state)
+
+    delta = events[-1].actions.state_delta
+    assert "run" in delta and isinstance(delta["run"], dict)
+    # No source_errors → the finalized run is exactly SUCCESS, fully serialized.
+    assert delta["run"]["status"] == "success"
+    assert delta["run"]["finished_at"] is not None
+    assert {"md", "xlsx", "html"} <= set(delta["run"]["outputs"])
+    # The emitted delta is a round-trippable, finalized DigestRun.
+    assert DigestRun.model_validate(delta["run"]).status == RunStatus.SUCCESS
+
+
 # ---------------------------------------------------------------------------
 # build_pipeline factory
 # ---------------------------------------------------------------------------
