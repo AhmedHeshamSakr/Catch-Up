@@ -32,6 +32,7 @@ from app.pipeline.agents import (
     ProcessingAgent,
     RenderAgent,
     SourceCollectorAgent,
+    _read_items,
     build_pipeline,
 )
 from app.pipeline.eval_schema import FaithfulnessVerdict
@@ -353,8 +354,9 @@ async def test_normalize_dedup_filters_existing_in_storage(tmp_path):
 
     assert run.collected == 2
     assert run.new == 1  # only the new article
-    assert len(state["items"]) == 1
-    assert state["items"][0].url == "https://b.com/1"
+    items = _read_items(state)
+    assert len(items) == 1
+    assert items[0].url == "https://b.com/1"
 
 
 @pytest.mark.asyncio
@@ -373,6 +375,32 @@ async def test_normalize_dedup_missing_raws_keys_treated_as_empty(tmp_path):
     assert run.collected == 0
     assert run.new == 0
     assert state["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_normalize_emits_run_and_items_delta(tmp_path):
+    settings = _settings(tmp_path)
+    storage = _storage(tmp_path)
+
+    run = DigestRun(run_id="r1")
+    storage.create_run(run)
+    state = {
+        "run": run,
+        "raws_rss": [_raw("https://x/1", "T")],
+        "errors_raws_rss": [{"source_id": "rss-src", "error": "boom", "ts": "t"}],
+    }
+
+    agent = NormalizeDedupAgent(name="NormalizeDedup", settings=settings, storage=storage)
+    events = await _run(agent, state)
+
+    delta = events[-1].actions.state_delta
+    assert delta["run"]["collected"] == 1
+    assert delta["run"]["new"] == 1
+    assert len(delta["items"]) == 1 and isinstance(delta["items"][0], dict)
+    # Merged per-source collector errors are serialized in the run delta.
+    assert delta["run"]["source_errors"] == [
+        {"source_id": "rss-src", "error": "boom", "ts": "t"}
+    ]
 
 
 # ---------------------------------------------------------------------------

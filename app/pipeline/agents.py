@@ -254,9 +254,8 @@ class NormalizeDedupAgent(BaseAgent):
         run.collected = len(all_raws)
         items = normalize_svc.normalize_and_dedup(all_raws, self.storage, run.run_id)
         run.new = len(items)
-        state["items"] = items
 
-        yield _make_event(ctx, self.name)
+        yield _make_event(ctx, self.name, {**_run_delta(run), **_items_delta(items)})
 
 
 # ---------------------------------------------------------------------------
