@@ -271,6 +271,7 @@ class ProcessingAgent(BaseAgent):
     settings: Settings
     storage: StorageBackend
     processor: Callable
+    watchlist: Watchlist
 
     async def _run_async_impl(
         self, ctx: InvocationContext
@@ -278,7 +279,7 @@ class ProcessingAgent(BaseAgent):
         state = ctx.session.state
         run = _read_run(state)
         items = _read_items(state)
-        watchlist = state["watchlist"]
+        watchlist = self.watchlist
 
         try:
             # Run the blocking LLM batch off the event loop so the loop stays
@@ -305,7 +306,7 @@ class ProcessingAgent(BaseAgent):
                 {"stage": "processing", "error": str(exc), "ts": _now()}
             )
 
-        yield _make_event(ctx, self.name)
+        yield _make_event(ctx, self.name, {**_run_delta(run), **_items_delta(items)})
 
 
 # ---------------------------------------------------------------------------
@@ -519,6 +520,7 @@ def build_pipeline(
                 settings=settings,
                 storage=storage,
                 processor=_processor,
+                watchlist=watchlist,
             ),
             GuardrailCriticAgent(
                 name="GuardrailCritic",

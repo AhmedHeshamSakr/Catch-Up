@@ -411,6 +411,7 @@ async def test_processing_agent_sets_item_statuses(tmp_path):
         settings=settings,
         storage=storage,
         processor=fake_processor,
+        watchlist=Watchlist(),
     )
     events = await _run(agent, state)
 
@@ -440,6 +441,7 @@ async def test_processing_agent_failure_adds_stage_error(tmp_path):
         settings=settings,
         storage=storage,
         processor=boom_processor,
+        watchlist=Watchlist(),
     )
     events = await _run(agent, state)
 
@@ -447,6 +449,36 @@ async def test_processing_agent_failure_adds_stage_error(tmp_path):
     assert len(run.source_errors) == 1
     assert run.source_errors[0]["stage"] == "processing"
     assert "LLM quota exhausted" in run.source_errors[0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_processing_emits_run_and_items_delta_using_injected_watchlist(tmp_path):
+    settings = _settings(tmp_path)
+    storage = _storage(tmp_path)
+
+    item = _news("https://a.com/1", "OpenAI launch")
+    run = DigestRun(run_id="r1")
+    # No "watchlist" key in state — the agent must use its injected watchlist.
+    state = {"run": run, "items": [item]}
+
+    def fake_processor(batch):
+        return ProcessingResult(items=[ItemEnrichment(
+            id=it.id, category=Category.AI_TECH, importance_score=0.9,
+            summary_en="S", summary_ar="ملخص", entities=[], sentiment="neutral",
+        ) for it in batch])
+
+    agent = ProcessingAgent(
+        name="Processing", settings=settings, storage=storage,
+        processor=fake_processor, watchlist=Watchlist(),
+    )
+    events = await _run(agent, state)
+
+    delta = events[-1].actions.state_delta
+    assert "run" in delta and "items" in delta
+    assert isinstance(delta["items"][0], dict)
+    # The enriched (in-place mutated) item is what got serialized.
+    assert delta["items"][0]["status"] == "processed"
+    assert delta["items"][0]["importance_score"] == 0.9
 
 
 # ---------------------------------------------------------------------------
@@ -1076,7 +1108,7 @@ async def test_processing_agent_runs_processor_off_the_event_loop(tmp_path):
         )])
 
     agent = ProcessingAgent(name="Processing", settings=settings, storage=storage,
-                            processor=blocking_processor)
+                            processor=blocking_processor, watchlist=Watchlist())
     stage = asyncio.create_task(_run(agent, state))
     try:
         for _ in range(200):
