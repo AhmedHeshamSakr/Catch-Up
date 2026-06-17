@@ -151,10 +151,23 @@ def get_transcript(video_id: str, settings: Settings, *, lang_pref: str | None =
                 except Exception:
                     continue
             if transcript is None:
-                # Accept whatever is available
+                # No preferred-language transcript: fall back to whatever exists,
+                # but log WHICH language we settled on so a wrong-language summary
+                # is auditable rather than silently summarized as the target lang.
                 transcripts = list(transcript_list)
                 if transcripts:
                     transcript = transcripts[0]
+                    lang = (
+                        getattr(transcript, "language_code", None)
+                        or getattr(transcript, "language", None)
+                        or "?"
+                    )
+                    if lang not in langs:
+                        log.warning(
+                            "youtube %s: no preferred-language transcript "
+                            "(%s); summarizing %r transcript instead",
+                            video_id, langs, lang,
+                        )
             if transcript is not None:
                 fetched = transcript.fetch()
                 return " ".join(seg.text for seg in fetched).strip() or None
