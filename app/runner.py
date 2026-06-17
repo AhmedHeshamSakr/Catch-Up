@@ -3,8 +3,14 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 from google.adk.runners import InMemoryRunner
+from google.adk.sessions import (
+    BaseSessionService,
+    DatabaseSessionService,
+    InMemorySessionService,
+)
 from google.genai import types
 
 from app.adapters.storage.sqlite_backend import SqliteBackend
@@ -35,6 +41,22 @@ def build_storage(settings: Settings) -> StorageBackend:
     backend = SqliteBackend(settings.sqlite_path)
     backend.init_schema()
     return backend
+
+
+def _resolve_session_db_url(settings: Settings) -> str:
+    """Effective ADK session DB URL. Empty session_db_url => a local SQLite file
+    next to sqlite_path (separate from the app DB; ADK owns its own schema)."""
+    if settings.session_db_url:
+        return settings.session_db_url
+    db_path = Path(settings.sqlite_path).resolve().parent / "sessions.db"
+    return f"sqlite+aiosqlite:///{db_path}"
+
+
+def make_session_service(settings: Settings) -> BaseSessionService:
+    """Build the ADK session service for a run from settings.session_backend."""
+    if settings.session_backend == "memory":
+        return InMemorySessionService()
+    return DatabaseSessionService(db_url=_resolve_session_db_url(settings))
 
 
 def _collect(source: SourceConfig, settings: Settings, storage: StorageBackend | None = None) -> list[RawItem]:
