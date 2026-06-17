@@ -133,8 +133,8 @@ export const api = {
     });
   },
 
-  triggerRun(): Promise<{ status: string }> {
-    return request<{ status: string }>("/api/runs", {
+  triggerRun(): Promise<{ status: string; run_id: string }> {
+    return request<{ status: string; run_id: string }>("/api/runs", {
       method: "POST",
     });
   },

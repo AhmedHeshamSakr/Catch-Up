@@ -17,13 +17,18 @@ export function RunNowButton({ onStarted, variant = "default", size = "default" 
   async function handleClick() {
     setPending(true);
     try {
-      await api.triggerRun();
+      const { run_id } = await api.triggerRun();
       toast.success("Digest run started", {
-        description: "Enrichment needs a Gemini API key on the server.",
+        description: `Run ${run_id.slice(0, 8)} is processing. Enrichment needs a Gemini API key on the server.`,
       });
       onStarted?.();
     } catch (err) {
-      if (err instanceof ApiError) {
+      if (err instanceof ApiError && err.status === 409) {
+        // Single-flight: a digest is already running on the server.
+        toast.error("A digest run is already in progress", {
+          description: "Wait for the current run to finish before starting another.",
+        });
+      } else if (err instanceof ApiError) {
         toast.error("Couldn't start run", { description: err.message });
       } else {
         toast.error("Couldn't start run", { description: "An unexpected error occurred." });
