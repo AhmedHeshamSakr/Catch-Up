@@ -67,8 +67,6 @@ class Settings(BaseSettings):
     # Deterministic generation for structured-output agents.
     llm_temperature: float = 0.0
     gnews_api_key: str = ""
-    youtube_whisper_enabled: bool = False
-    whisper_model: str = "base"
     critic_enabled: bool = True
     critic_min_importance: Importance = Importance.HIGH
     critic_check_watchlisted: bool = True
