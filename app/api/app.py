@@ -104,14 +104,22 @@ def register_product_routes(
     require_api_key = Depends(_require_api_key(settings))
     rate_limit = Depends(_rate_limiter(rate_bucket))
 
+    if not settings.api_key:
+        logger.warning(
+            "API_KEY is unset — the product API is OPEN (no auth on any route). "
+            "Set API_KEY for any non-local deployment."
+        )
+
     def storage():
         return build_storage(settings)
 
+    # /health is intentionally public (liveness probe). Every other route
+    # requires the key WHEN one is configured (no-op when api_key is unset).
     @api.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @api.get("/dashboard", response_model=DashboardOut)
+    @api.get("/dashboard", response_model=DashboardOut, dependencies=[require_api_key])
     def dashboard() -> DashboardOut:
         st = storage()
         runs = st.list_runs(limit=10)
@@ -127,14 +135,14 @@ def register_product_routes(
             total_items=len(items),
         )
 
-    @api.get("/runs")
+    @api.get("/runs", dependencies=[require_api_key])
     def list_runs(
         limit: int = Query(50, ge=1, le=200),
         offset: int = Query(0, ge=0),
     ):
         return storage().list_runs(limit=limit, offset=offset)
 
-    @api.get("/runs/{run_id}", response_model=RunDetail)
+    @api.get("/runs/{run_id}", response_model=RunDetail, dependencies=[require_api_key])
     def get_run(run_id: str) -> RunDetail:
         st = storage()
         run = st.get_run(run_id)
@@ -142,7 +150,7 @@ def register_product_routes(
             raise HTTPException(status_code=404, detail="run not found")
         return RunDetail(run=run, items=st.get_items_for_run(run_id))
 
-    @api.get("/news")
+    @api.get("/news", dependencies=[require_api_key])
     def list_news(category: Category | None = None, importance: Importance | None = None,
                   limit: int = Query(50, ge=1, le=200),
                   offset: int = Query(0, ge=0)):
@@ -150,7 +158,7 @@ def register_product_routes(
             category=category, importance=importance, limit=limit, offset=offset
         )
 
-    @api.get("/sources")
+    @api.get("/sources", dependencies=[require_api_key])
     def get_sources():
         return load_sources(settings.config_dir)
 
@@ -159,7 +167,7 @@ def register_product_routes(
         config_store.write_sources(settings.config_dir, sources)
         return {"status": "ok", "count": len(sources)}
 
-    @api.get("/watchlist", response_model=Watchlist)
+    @api.get("/watchlist", response_model=Watchlist, dependencies=[require_api_key])
     def get_watchlist() -> Watchlist:
         return load_watchlist(settings.config_dir)
 

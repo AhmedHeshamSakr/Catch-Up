@@ -451,11 +451,23 @@ def test_mutating_routes_require_api_key_when_set(tmp_path):
     assert c.post("/api/runs", headers={"X-API-Key": "nope"}).status_code == 401
 
 
-def test_get_routes_open_even_with_api_key(tmp_path):
+def test_read_routes_require_api_key_when_set(tmp_path):
+    """When api_key is configured, EVERY route except /health requires it."""
     c = _auth_client(tmp_path, api_key="secret")
+    # /health stays public (liveness probe).
     assert c.get("/api/health").status_code == 200
-    assert c.get("/api/sources").status_code == 200
-    assert c.get("/api/watchlist").status_code == 200
+    # Reads now 401 without the key...
+    for path in ("/api/dashboard", "/api/runs", "/api/runs/r1", "/api/news",
+                 "/api/sources", "/api/watchlist"):
+        assert c.get(path).status_code == 401, path
+    # ...and succeed with it (404 for the missing run is still "authorized").
+    h = {"X-API-Key": "secret"}
+    assert c.get("/api/dashboard", headers=h).status_code == 200
+    assert c.get("/api/runs", headers=h).status_code == 200
+    assert c.get("/api/news", headers=h).status_code == 200
+    assert c.get("/api/sources", headers=h).status_code == 200
+    assert c.get("/api/watchlist", headers=h).status_code == 200
+    assert c.get("/api/runs/r1", headers=h).status_code == 404
 
 
 def test_auth_default_open_when_unset(tmp_path):

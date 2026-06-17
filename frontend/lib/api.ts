@@ -41,10 +41,16 @@ async function request<T>(
   schema?: ZodType<T>
 ): Promise<T> {
   const base = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
-  const res = await fetch(base + path, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-  });
+  // Optional shared API key. Sent only when configured; exposed to the browser
+  // (NEXT_PUBLIC_*), so use only for trusted/internal deploys — real per-user
+  // auth is a separate milestone. Must match the backend's API_KEY.
+  const apiKey = process.env.NEXT_PUBLIC_API_KEY;
+  // Normalize to Headers so an explicit init.headers (plain object, tuple array,
+  // OR a Headers instance) always wins and our defaults only fill the gaps.
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (apiKey && !headers.has("X-API-Key")) headers.set("X-API-Key", apiKey);
+  const res = await fetch(base + path, { ...init, headers });
   if (!res.ok) {
     // Keep the raw body as debug detail but never surface it (could be HTML /
     // a stack trace) as the user-facing message.

@@ -44,6 +44,25 @@ it("triggerRun POSTs /api/runs", async () => {
   expect(opts.method).toBe("POST");
 });
 
+it("sends X-API-Key header when NEXT_PUBLIC_API_KEY is set", async () => {
+  process.env.NEXT_PUBLIC_API_KEY = "secret123";
+  const fetchMock = vi.fn().mockResolvedValue(new Response("[]", { status: 200 }));
+  vi.stubGlobal("fetch", fetchMock);
+  await api.getSources();
+  const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Headers;
+  expect(headers.get("X-API-Key")).toBe("secret123");
+  delete process.env.NEXT_PUBLIC_API_KEY;
+});
+
+it("omits X-API-Key header when NEXT_PUBLIC_API_KEY is unset", async () => {
+  delete process.env.NEXT_PUBLIC_API_KEY;
+  const fetchMock = vi.fn().mockResolvedValue(new Response("[]", { status: 200 }));
+  vi.stubGlobal("fetch", fetchMock);
+  await api.getSources();
+  const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Headers;
+  expect(headers.get("X-API-Key")).toBeNull();
+});
+
 it("throws ApiError on non-2xx without leaking the raw body into the message", async () => {
   vi.stubGlobal(
     "fetch",
