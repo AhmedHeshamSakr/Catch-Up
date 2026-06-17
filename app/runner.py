@@ -101,6 +101,8 @@ def run_digest(
     narrator=None,
     critic=None,
     reprocessor=None,
+    *,
+    run_id: str | None = None,
 ) -> DigestRun:
     # Deferred: app.pipeline.agents imports this module at top level, so
     # importing it here at module scope would reintroduce a load-time cycle.
@@ -108,7 +110,9 @@ def run_digest(
 
     settings = settings or Settings()
     storage = storage or build_storage(settings)
-    run_id = uuid.uuid4().hex[:12]
+    # Caller (e.g. POST /api/runs) may inject the run_id so it can be returned
+    # to the client before the run finishes; otherwise generate one.
+    run_id = run_id or uuid.uuid4().hex[:12]
     tree = build_pipeline(
         settings, storage,
         run_id=run_id,

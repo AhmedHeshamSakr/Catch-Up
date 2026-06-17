@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import hmac
 import logging
+import threading
+import uuid
 from collections.abc import Callable
 
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     FastAPI,
     Header,
@@ -24,6 +25,21 @@ from app.services.ratelimit import TokenBucket
 from app.services.watchlist import Watchlist, load_watchlist
 
 logger = logging.getLogger(__name__)
+
+# Single-flight guard for POST /api/runs. A digest run is a multi-minute,
+# DB-writing job; without this, concurrent triggers would spawn many pipelines
+# hammering one SQLite file. Per-process only (a multi-instance deploy needs a
+# shared lock — see the production milestone).
+_run_lock = threading.Lock()
+
+
+def _run_digest_guarded(run_digest_fn: Callable[..., object], *, settings, run_id: str) -> None:
+    """Run the digest, always releasing the single-flight lock when done."""
+    try:
+        run_digest_fn(settings=settings, run_id=run_id)
+    finally:
+        _run_lock.release()
+
 
 # Cap on the number of news items pulled to compute dashboard category counts.
 # Bounded so the dashboard stays cheap; the full list is paginated via /api/news.
@@ -153,9 +169,24 @@ def register_product_routes(
         return {"status": "ok"}
 
     @api.post("/runs", status_code=202, dependencies=[require_api_key, rate_limit])
-    def trigger_run(background: BackgroundTasks):
-        background.add_task(run_digest_fn, settings=settings)
-        return {"status": "started"}
+    def trigger_run():
+        # Single-flight: reject if a run is already in progress so we don't fan
+        # out concurrent pipelines onto one SQLite file.
+        if not _run_lock.acquire(blocking=False):
+            raise HTTPException(status_code=409, detail="a digest run is already in progress")
+        run_id = uuid.uuid4().hex[:12]
+        # Run on a worker thread started synchronously HERE (not via Starlette
+        # BackgroundTasks): the thread — and thus its lock-releasing finally —
+        # is guaranteed to run even if the client disconnects mid-response, so
+        # the single-flight lock can't leak and wedge future runs.
+        thread = threading.Thread(
+            target=_run_digest_guarded,
+            kwargs={"run_digest_fn": run_digest_fn, "settings": settings, "run_id": run_id},
+            daemon=True,
+        )
+        thread.start()
+        # Return the id so the client can poll GET /api/runs/{run_id}.
+        return {"status": "started", "run_id": run_id}
 
     @api.post("/sources/resolve", response_model=ResolveOut,
               dependencies=[require_api_key, rate_limit])
