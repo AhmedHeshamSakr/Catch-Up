@@ -114,8 +114,11 @@ def aggregate(
 def compare(baseline: EvalReport, candidate: EvalReport) -> dict:
     """Return per-dimension delta and a list of regressions.
 
-    A dimension regresses when its mean score drops by more than
-    ``REGRESSION_DELTA`` relative to the baseline.
+    Soft dimensions regress when their mean score drops by more than
+    ``REGRESSION_DELTA`` relative to the baseline. Safety-critical dimensions
+    (gated on pass_rate == 1.0) regress on ANY pass_rate drop vs baseline — a
+    mean-only check averages a single hallucination away and would ship it, so
+    the regression signal must mirror the acceptance gate's signal.
     """
     deltas: dict[str, float] = {}
     regressions: list[str] = []
@@ -125,7 +128,20 @@ def compare(baseline: EvalReport, candidate: EvalReport) -> dict:
         c = candidate.dimension_mean_score.get(dim, 0.0)
         delta = c - b
         deltas[dim] = round(delta, 6)
-        if delta < -REGRESSION_DELTA:
+        if dim in SAFETY_CRITICAL:
+            # Mirror _dimension_passes (which gates on pass_rate). pass_rate is
+            # the primary signal: ANY drop is a regression — this is exactly
+            # what a mean-only check misses (one hallucination averaged away).
+            # The mean is only a secondary signal when pass_rate is UNCHANGED
+            # (catches broad score degradation). A pass_rate IMPROVEMENT is
+            # never a regression, even if the mean dipped.
+            b_pr = baseline.dimension_pass_rate.get(dim, 0.0)
+            c_pr = candidate.dimension_pass_rate.get(dim, 0.0)
+            if c_pr < b_pr:
+                regressions.append(dim)
+            elif c_pr == b_pr and delta < -REGRESSION_DELTA:
+                regressions.append(dim)
+        elif delta < -REGRESSION_DELTA:
             regressions.append(dim)
 
     return {"deltas": deltas, "regressions": regressions}
