@@ -103,13 +103,17 @@ def configure_genai(settings: Settings) -> None:
     """Configure the google-genai client env for AI Studio (default) or Vertex.
 
     Never overwrites a value already in os.environ (respects operator-set env).
+    Uses getattr defaults so minimal test settings-stubs (which only define
+    google_api_key) keep working — see tests/integration/test_pipeline_live_bridge.py.
     """
-    if settings.use_vertexai:
-        if not settings.google_cloud_project:
+    if getattr(settings, "use_vertexai", False):
+        project = getattr(settings, "google_cloud_project", "")
+        if not project:
             raise ValueError("use_vertexai=True requires google_cloud_project")
+        location = getattr(settings, "google_cloud_location", "global")
         os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "TRUE")
-        os.environ.setdefault("GOOGLE_CLOUD_PROJECT", settings.google_cloud_project)
-        os.environ.setdefault("GOOGLE_CLOUD_LOCATION", settings.google_cloud_location)
+        os.environ.setdefault("GOOGLE_CLOUD_PROJECT", project)
+        os.environ.setdefault("GOOGLE_CLOUD_LOCATION", location)
         return
     # AI Studio (unchanged): the google client reads GOOGLE_API_KEY from the env.
     if settings.google_api_key and not os.environ.get("GOOGLE_API_KEY"):
@@ -484,7 +488,7 @@ git commit -m "feat(storage): FirestoreBackend adapter (injectable client, contr
 ### Task 4: `build_storage` honors `storage_backend` + `[firestore]` extra
 
 **Files:**
-- Modify: `app/runner.py:34-37` (`build_storage`) + new `_firestore_client`
+- Modify: `app/runner.py` — `build_storage` + new `_firestore_client`
 - Modify: `pyproject.toml:37-45` (optional-dependencies)
 - Test: `tests/unit/test_build_storage.py`
 
@@ -579,7 +583,7 @@ firestore = [
     "google-cloud-firestore>=2.16.0,<3.0.0",
 ]
 ```
-(Do NOT run `uv sync` to install it — it stays uninstalled in the test env so the missing-extra test exercises the error path.)
+Then run `uv lock` (the repo tracks `uv.lock`; this resolves the new optional dep into the lock graph). Do **NOT** run `uv sync`/`uv sync --extra firestore` — the package must stay **uninstalled** in the test env so the missing-extra test exercises the error path.
 
 - [ ] **Step 5: Run to verify they pass**
 
@@ -589,7 +593,7 @@ Expected: PASS (4 tests).
 - [ ] **Step 6: Commit**
 
 ```bash
-git add app/runner.py pyproject.toml tests/unit/test_build_storage.py
+git add app/runner.py pyproject.toml uv.lock tests/unit/test_build_storage.py
 git commit -m "feat(storage): build_storage honors storage_backend + [firestore] extra"
 ```
 
@@ -659,7 +663,7 @@ git commit -m "docs+test: Firestore/Vertex readiness notes + skipped emulator pl
 - `build_storage` honors `storage_backend` + actionable missing-extra error → Task 4. ✓
 - `[firestore]` optional extra, not a test dep → Task 4. ✓
 - Data model (2 collections, `is_flagged` derived, `model_dump`/`model_validate`) → Task 3. ✓
-- All 10 methods → Task 3 (8 via `StorageContract`, `existing_ids`/`init_schema` via contract + is_flagged test). ✓
+- All 9 `StorageBackend` methods → Task 3 (via `StorageContract` inheritance + the is_flagged test; `init_schema` is a no-op exercised by the fixture). ✓
 - Shared contract suite across both backends → Task 3 (reuses `StorageContract`). ✓
 - Vertex `configure_genai` + settings + fail-fast empty project → Task 1. ✓
 - `ensure_api_key` alias preserved → Task 1. ✓
