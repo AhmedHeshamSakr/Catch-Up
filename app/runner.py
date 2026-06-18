@@ -37,10 +37,29 @@ from app.services.render import excel, markdown  # noqa: F401 — monkeypatch ta
 from app.services.render import html as html_render  # noqa: F401 — monkeypatch target
 
 
+def _firestore_client(settings: Settings):
+    """Construct a real Firestore client; clear error if the extra is missing."""
+    try:
+        from google.cloud import firestore
+    except ImportError as exc:  # optional [firestore] extra not installed
+        raise RuntimeError(
+            "storage_backend='firestore' requires the [firestore] extra: "
+            "uv pip install '.[firestore]'"
+        ) from exc
+    return firestore.Client(project=settings.google_cloud_project or None)
+
+
 def build_storage(settings: Settings) -> StorageBackend:
-    backend = SqliteBackend(settings.sqlite_path)
-    backend.init_schema()
-    return backend
+    backend = settings.storage_backend
+    if backend == "sqlite":
+        store: StorageBackend = SqliteBackend(settings.sqlite_path)
+    elif backend == "firestore":
+        from app.adapters.storage.firestore_backend import FirestoreBackend
+        store = FirestoreBackend(_firestore_client(settings))
+    else:
+        raise ValueError(f"unknown storage_backend: {backend!r}")
+    store.init_schema()
+    return store
 
 
 def _resolve_session_db_url(settings: Settings) -> str:
