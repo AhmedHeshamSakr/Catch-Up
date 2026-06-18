@@ -38,6 +38,9 @@ dev = [
 eval = [
     "google-adk[eval]>=1.15.0,<2.0.0",
 ]
+firestore = [
+    "google-cloud-firestore>=2.16.0,<3.0.0",
+]
 lint = [
     "ruff>=0.4.6,<1.0.0",
     "ty>=0.0.1a0",

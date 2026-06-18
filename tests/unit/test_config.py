@@ -55,6 +55,15 @@ def test_allow_origins_defaults_to_localhost(monkeypatch):
     assert Settings(_env_file=None).allow_origins == ["http://localhost:3000"]
 
 
+def test_vertex_defaults(monkeypatch):
+    for k in ("USE_VERTEXAI", "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION"):
+        monkeypatch.delenv(k, raising=False)
+    s = Settings(_env_file=None)
+    assert s.use_vertexai is False
+    assert s.google_cloud_project == ""
+    assert s.google_cloud_location == "global"
+
+
 def test_session_defaults(monkeypatch):
     # Clear so the conftest's suite-wide SESSION_BACKEND=memory (and any CI env)
     # doesn't mask the real field defaults.

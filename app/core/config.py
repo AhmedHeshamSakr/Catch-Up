@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     #   sqlite+aiosqlite:///<dir of sqlite_path>/sessions.db
     # Set explicitly to point at another backend later (e.g. postgresql+asyncpg://).
     session_db_url: str = ""
+    # LLM provider. False (default) = Google AI Studio via GOOGLE_API_KEY. True =
+    # Vertex AI (sets GOOGLE_GENAI_USE_VERTEXAI + project/location for the genai
+    # client). "global" location avoids the model-404s seen on regional endpoints.
+    use_vertexai: bool = False
+    google_cloud_project: str = ""
+    google_cloud_location: str = "global"
     # Deterministic generation for structured-output agents.
     llm_temperature: float = 0.0
     gnews_api_key: str = ""
