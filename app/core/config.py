@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     use_vertexai: bool = False
     google_cloud_project: str = ""
     google_cloud_location: str = "global"
+    # Scheduled digest runs (opt-in). When enabled, `catchup serve` runs the
+    # digest on schedule_cron (standard 5-field cron) in schedule_timezone.
+    # Cloud deploys instead point Cloud Scheduler at POST /api/runs (see docs).
+    schedule_enabled: bool = False
+    schedule_cron: str = ""
+    schedule_timezone: str = "UTC"
     # Deterministic generation for structured-output agents.
     llm_temperature: float = 0.0
     gnews_api_key: str = ""

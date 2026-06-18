@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import hmac
 import logging
-import threading
-import uuid
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 
 from fastapi import (
     APIRouter,
@@ -19,26 +18,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.schemas import DashboardOut, ResolveIn, ResolveOut, RunDetail
 from app.core.config import Settings, SourceConfig, load_sources
 from app.core.domain import Category, Importance
+from app.run_trigger import try_start_run
 from app.runner import build_storage, run_digest
 from app.services import config_store, feed_discovery, youtube_resolve
 from app.services.ratelimit import TokenBucket
+from app.services.scheduler import build_scheduler
 from app.services.watchlist import Watchlist, load_watchlist
 
 logger = logging.getLogger(__name__)
-
-# Single-flight guard for POST /api/runs. A digest run is a multi-minute,
-# DB-writing job; without this, concurrent triggers would spawn many pipelines
-# hammering one SQLite file. Per-process only (a multi-instance deploy needs a
-# shared lock — see the production milestone).
-_run_lock = threading.Lock()
-
-
-def _run_digest_guarded(run_digest_fn: Callable[..., object], *, settings, run_id: str) -> None:
-    """Run the digest, always releasing the single-flight lock when done."""
-    try:
-        run_digest_fn(settings=settings, run_id=run_id)
-    finally:
-        _run_lock.release()
 
 
 # Cap on the number of news items pulled to compute dashboard category counts.
@@ -178,22 +165,12 @@ def register_product_routes(
 
     @api.post("/runs", status_code=202, dependencies=[require_api_key, rate_limit])
     def trigger_run():
-        # Single-flight: reject if a run is already in progress so we don't fan
-        # out concurrent pipelines onto one SQLite file.
-        if not _run_lock.acquire(blocking=False):
+        # Single-flight (shared with the scheduler via app.run_trigger): reject
+        # with 409 if a run is already in progress so we don't fan out concurrent
+        # pipelines onto one SQLite file.
+        run_id = try_start_run(settings, run_digest_fn=run_digest_fn)
+        if run_id is None:
             raise HTTPException(status_code=409, detail="a digest run is already in progress")
-        run_id = uuid.uuid4().hex[:12]
-        # Run on a worker thread started synchronously HERE (not via Starlette
-        # BackgroundTasks): the thread — and thus its lock-releasing finally —
-        # is guaranteed to run even if the client disconnects mid-response, so
-        # the single-flight lock can't leak and wedge future runs.
-        thread = threading.Thread(
-            target=_run_digest_guarded,
-            kwargs={"run_digest_fn": run_digest_fn, "settings": settings, "run_id": run_id},
-            daemon=True,
-        )
-        thread.start()
-        # Return the id so the client can poll GET /api/runs/{run_id}.
         return {"status": "started", "run_id": run_id}
 
     @api.post("/sources/resolve", response_model=ResolveOut,
@@ -238,7 +215,22 @@ def create_app(
 ) -> FastAPI:
     """Standalone product API (run by ``catchup serve``)."""
     settings = settings or Settings()
-    app = FastAPI(title="Catch-Up API", version="0.1.0")
+
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI):
+        scheduler = build_scheduler(
+            settings, lambda: try_start_run(settings, run_digest_fn=run_digest_fn)
+        )
+        if scheduler is not None:
+            scheduler.start()
+        app.state.scheduler = scheduler
+        try:
+            yield
+        finally:
+            if app.state.scheduler is not None:
+                app.state.scheduler.shutdown(wait=False)
+
+    app = FastAPI(title="Catch-Up API", version="0.1.0", lifespan=_lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allow_origins,
