@@ -114,3 +114,7 @@ Screens:
 ## License
 
 Private.
+
+## Scheduling (opt-in)
+
+Set `SCHEDULE_ENABLED=true` + `SCHEDULE_CRON="0 7 * * *"` (+ optional `SCHEDULE_TIMEZONE`). `catchup serve` then runs the digest in-process on that cron via APScheduler, sharing the single-flight guard with manual `POST /api/runs`. In production, point Cloud Scheduler at `POST /api/runs` instead (see `docs/ADK-GUIDE.md` §6).

@@ -156,6 +156,12 @@ Tests inject fakes (synthetic Pydantic results / fixtures), so the **full suite 
 - **Free / local (v1):** a Google **AI Studio** key in `app/.env` as `GOOGLE_API_KEY`. `configure_genai()` (aliased `ensure_api_key()`) exports it for the `google-genai` client. SQLite storage; the pipeline runs on a persistent SQLite-backed `DatabaseSessionService` by default (`session_backend`; tests force `memory`).
 - **Vertex AI (opt-in):** set `use_vertexai=True` (+ `google_cloud_project`, `google_cloud_location` default `"global"`). `configure_genai()` then sets `GOOGLE_GENAI_USE_VERTEXAI=TRUE`/project/location and skips the API key. Fails fast if the project is empty.
 - **Firestore storage (opt-in):** set `storage_backend="firestore"` + install the `[firestore]` extra. `build_storage()` returns a `FirestoreBackend` (behind the same `StorageBackend` port) wrapping a real `firestore.Client`; an actionable error fires if the extra is missing. The adapter is contract-tested offline against an in-memory `FakeFirestoreClient` — it satisfies the same `StorageContract` as the SQLite backend. **Caveat — not validated against live Firestore:** composite indexes, `FieldFilter` migration, and `is_flagged` backfill are pre-deploy steps gated by the skipped `tests/integration/test_firestore_emulator.py`.
+- **Scheduling (opt-in):** set `schedule_enabled=True` + `schedule_cron` (5-field cron, e.g. `"0 7 * * *"`) + `schedule_timezone`. `catchup serve` then runs the digest in-process on that cadence via APScheduler, sharing the single-flight guard (`app/run_trigger.try_start_run`) with manual `POST /api/runs` — a scheduled run while one is in flight is skipped, never doubled. In production, instead point **Cloud Scheduler** at the existing endpoint (no in-process code):
+  ```bash
+  gcloud scheduler jobs create http catchup-digest \
+    --schedule="0 7 * * *" --time-zone="UTC" \
+    --uri="https://<host>/api/runs" --http-method=POST --headers="X-API-Key=<key>"
+  ```
 - **Deploy:** the milestone target is local/self-hosted; the `App` (Agent Engine / Cloud Run) path is future. No pipeline rewrite — all swap-points are behind interfaces.
 
 ---
