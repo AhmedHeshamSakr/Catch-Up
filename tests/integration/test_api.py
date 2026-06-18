@@ -526,3 +526,23 @@ def test_resolve_rate_limited(tmp_path):
     r = c.post("/api/sources/resolve", json=body)
     assert r.status_code == 429
     assert r.json()["detail"] == "rate limit exceeded"
+
+
+def test_scheduler_starts_when_enabled(tmp_path):
+    cfg = _runs_settings(tmp_path)
+    settings = Settings(
+        _env_file=None, schedule_enabled=True, schedule_cron="0 7 * * *",
+        sqlite_path=cfg.sqlite_path, config_dir=cfg.config_dir, output_dir=cfg.output_dir,
+    )
+    app = create_app(settings, run_digest_fn=lambda **kw: None)
+    with TestClient(app):
+        assert app.state.scheduler is not None
+        assert app.state.scheduler.running
+    # lifespan shutdown stopped it
+    assert not app.state.scheduler.running
+
+
+def test_scheduler_absent_by_default(tmp_path):
+    app = create_app(_runs_settings(tmp_path), run_digest_fn=lambda **kw: None)
+    with TestClient(app):
+        assert app.state.scheduler is None

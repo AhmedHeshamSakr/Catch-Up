@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac
 import logging
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 
 from fastapi import (
     APIRouter,
@@ -21,6 +22,7 @@ from app.run_trigger import try_start_run
 from app.runner import build_storage, run_digest
 from app.services import config_store, feed_discovery, youtube_resolve
 from app.services.ratelimit import TokenBucket
+from app.services.scheduler import build_scheduler
 from app.services.watchlist import Watchlist, load_watchlist
 
 logger = logging.getLogger(__name__)
@@ -213,7 +215,22 @@ def create_app(
 ) -> FastAPI:
     """Standalone product API (run by ``catchup serve``)."""
     settings = settings or Settings()
-    app = FastAPI(title="Catch-Up API", version="0.1.0")
+
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI):
+        scheduler = build_scheduler(
+            settings, lambda: try_start_run(settings, run_digest_fn=run_digest_fn)
+        )
+        if scheduler is not None:
+            scheduler.start()
+        app.state.scheduler = scheduler
+        try:
+            yield
+        finally:
+            if app.state.scheduler is not None:
+                app.state.scheduler.shutdown(wait=False)
+
+    app = FastAPI(title="Catch-Up API", version="0.1.0", lifespan=_lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allow_origins,
