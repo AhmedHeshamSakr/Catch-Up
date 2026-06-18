@@ -359,8 +359,7 @@ def build_scheduler(settings: Settings, trigger_fn: Callable[[], object]):
 - [ ] **Step 4: Run to verify they pass**
 
 Run: `uv run pytest tests/unit -q -k scheduler`
-Expected: PASS (6 tests).
-> If `get_jobs()` returns empty before `start()` in the installed APScheduler, instead build with `scheduler.start(paused=True)` inside `build_scheduler` only for inspection — but prefer the not-started form; verify against the installed version.
+Expected: PASS (6 tests). APScheduler 3.x `get_jobs()` returns pending jobs before `start()`, so inspecting `jobs[0].trigger`/`.func` works on the not-started scheduler. (If a future version changed this, fix the TEST's inspection — never change `build_scheduler`'s not-started contract.)
 
 - [ ] **Step 5: Commit**
 
