@@ -55,6 +55,19 @@ def test_allow_origins_defaults_to_localhost(monkeypatch):
     assert Settings(_env_file=None).allow_origins == ["http://localhost:3000"]
 
 
+def test_schedule_defaults(monkeypatch):
+    for k in ("SCHEDULE_ENABLED", "SCHEDULE_CRON", "SCHEDULE_TIMEZONE"):
+        monkeypatch.delenv(k, raising=False)
+    s = Settings(_env_file=None)
+    assert s.schedule_enabled is False
+    assert s.schedule_cron == ""
+    assert s.schedule_timezone == "UTC"
+
+
+def test_apscheduler_importable():
+    import apscheduler  # noqa: F401
+
+
 def test_vertex_defaults(monkeypatch):
     for k in ("USE_VERTEXAI", "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION"):
         monkeypatch.delenv(k, raising=False)
