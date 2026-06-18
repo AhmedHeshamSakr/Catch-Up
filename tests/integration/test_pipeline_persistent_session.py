@@ -1,21 +1,18 @@
-"""Plan-9 guard: run the pipeline tree against a persistent session service.
+"""Durability guard: run the pipeline tree against a persistent session service.
 
-The pipeline mutates ``ctx.session.state`` directly, which works with the
-in-process ``InMemoryRunner`` / ``InMemorySessionService``. A persistent /
-distributed session service (Firestore / Vertex Agent Engine — Plan 9) is the
-thing most likely to break that pattern, because durable values must travel via
-``EventActions.state_delta`` to be persisted across processes.
+The pipeline now propagates every cross-stage value via
+``EventActions.state_delta`` (run/items/raws as JSON), so it is portable to any
+persistent / distributed session service (Firestore / Vertex Agent Engine).
+This test proves that against ADK's SQLite-backed ``DatabaseSessionService``
+(the closest persistent stand-in available locally), fully offline.
 
-This test drives the tree against ADK's SQLite-backed ``DatabaseSessionService``
-(the closest persistent stand-in available locally), fully offline. It is
-written to document the Plan-9 risk in every environment:
-
-* If ``DatabaseSessionService`` is importable AND its async engine can actually
-  be initialized here → the tree runs and we assert portability (SUCCESS).
-* If the tree FAILS against it (revealing the direct-state-mutation break) →
-  the assertion is xfail (see the module-level marker logic below).
-* If the service is importable but cannot be constructed/run in this
-  environment (missing async sqlite driver or greenlet) → the test skips.
+The real guard is the RELOAD assertion: within a single ``run_async`` the
+in-memory session masks direct-mutation bugs, so the test reloads the session
+through a fresh service instance and asserts the durable ``run`` survived — only
+``state_delta``-persisted values do. With the old direct-``ctx.session.state``
+mutation this fails (a reload shows only ``run_id``); with the delta-driven tree
+it passes. The service-availability probe stays only as a skip safety net for
+environments that can't construct the async SQLite engine.
 """
 from __future__ import annotations
 
@@ -89,10 +86,10 @@ def _raw(url: str, title: str) -> RawItem:
 
 @pytest.mark.asyncio
 async def test_pipeline_tree_against_persistent_session(tmp_path):
-    """Run the tree via Runner + DatabaseSessionService (offline) and assert the
-    run finalizes as a SUCCESS DigestRun — proving the tree is portable to a
-    persistent session service. If the direct ctx.session.state mutation does
-    not survive that service, this assertion xfails (Plan-9 break found)."""
+    """Run the tree via Runner + DatabaseSessionService (offline), assert a
+    SUCCESS DigestRun, then reload the session through a fresh service and assert
+    the durable run survived — proving the delta-driven tree is portable to a
+    persistent session service."""
     runnable, reason = await _service_runnable(tmp_path)
     if not runnable:
         pytest.skip(reason)
@@ -132,19 +129,30 @@ async def test_pipeline_tree_against_persistent_session(tmp_path):
     )
     msg = types.Content(role="user", parts=[types.Part.from_text(text="run")])
 
-    try:
-        async for _ in runner.run_async(
-            user_id="system", session_id=session.id, new_message=msg
-        ):
-            pass
-        run = storage.get_run(run_id)
-        assert run is not None
-        assert run.status == RunStatus.SUCCESS
-        assert run.collected == 1
-        assert run.new == 1
-    except Exception as exc:  # direct-state-mutation break surfaced
-        pytest.xfail(
-            "direct ctx.session.state mutation not persisted by "
-            f"DatabaseSessionService — Plan 9 must move durable values to "
-            f"state_delta: {exc}"
-        )
+    async for _ in runner.run_async(
+        user_id="system", session_id=session.id, new_message=msg
+    ):
+        pass
+    run = storage.get_run(run_id)
+    assert run is not None
+    assert run.status == RunStatus.SUCCESS
+    assert run.collected == 1
+    assert run.new == 1
+
+    # Genuine durability guard: reload the session via a FRESH service instance
+    # (forces a DB read). Only state_delta-persisted values survive a reload, so
+    # this fails for direct ctx.session.state mutation and passes now that the
+    # tree is fully delta-driven. (Within a single run_async the in-memory session
+    # masks the gap, so asserting on storage alone is not enough.)
+    reload_svc = DatabaseSessionService(db_url=_db_url(tmp_path))
+    reloaded = await reload_svc.get_session(
+        app_name="catchup", user_id="system", session_id=session.id
+    )
+    assert reloaded is not None
+    assert "run" in reloaded.state
+    assert reloaded.state["run"]["run_id"] == run_id
+    assert reloaded.state["run"]["status"] == "success"
+
+    # Dispose the per-test async engines so no SQLite connection pools linger.
+    await reload_svc.db_engine.dispose()
+    await session_service.db_engine.dispose()

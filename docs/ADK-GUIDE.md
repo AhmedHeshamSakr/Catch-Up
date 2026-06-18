@@ -16,9 +16,9 @@ How this project uses the **Google Agent Development Kit (ADK)**: which ADK piec
 | `SequentialAgent` | `from google.adk.agents import SequentialAgent` | The root `NewsCatchUpPipeline` — runs stages in order, sharing session state. |
 | `ParallelAgent` | `from google.adk.agents import ParallelAgent` | `CollectSources` — runs the 5 source collectors concurrently. |
 | `App` | `from google.adk.apps import App` | `app/agent.py` exposes `app = App(root_agent=..., name="app")` for `adk run`/`adk web`. |
-| `InMemoryRunner` / `run_async` | `from google.adk.runners import InMemoryRunner` | Executes agents. `run_digest` drives the tree; `adk_runtime.run_agent_text` drives single LLM agents. |
-| `Session` / `ctx.session.state` | (via `InvocationContext`) | The shared dict that carries data between pipeline stages. |
-| `Event` / `EventActions` | `from google.adk.events import Event, EventActions` | Each `BaseAgent` yields a terminal `Event`. |
+| `Runner` / `run_async` | `from google.adk.runners import Runner` | `run_digest` drives the tree via `Runner` + a persistent `DatabaseSessionService`. Single LLM-agent calls (`llm/runtime.run_agent_text`, search) keep `InMemoryRunner`. |
+| `Session` / `ctx.session.state` | (via `InvocationContext`) | Carries data between stages; written via `state_delta`, never direct mutation. |
+| `Event` / `EventActions` | `from google.adk.events import Event, EventActions` | Each `BaseAgent` yields a terminal `Event` carrying its `EventActions.state_delta`. |
 | `google.genai.types` | `from google.genai import types` | `types.Content` / `types.Part` for messages; `GroundingMetadata` for search harvesting. |
 
 ---
@@ -29,7 +29,7 @@ Built by `build_pipeline()` in `app/pipeline/agents.py`. Root = a `SequentialAge
 
 ```
 NewsCatchUpPipeline               (SequentialAgent)              app/pipeline/agents.py
-├─ PipelineInit                   (BaseAgent)   create DigestRun, load watchlist → state
+├─ PipelineInit                   (BaseAgent)   create DigestRun → run delta (watchlist injected, not in state)
 ├─ CollectSources                 (ParallelAgent)
 │   ├─ CollectRss                 (BaseAgent → app/services/rss.py)        → state["raws_rss"]
 │   ├─ CollectScrape              (BaseAgent → app/services/scrape.py)     → state["raws_scrape"]
@@ -39,21 +39,21 @@ NewsCatchUpPipeline               (SequentialAgent)              app/pipeline/ag
 ├─ NormalizeDedup                 (BaseAgent → app/services/normalize.py)  → state["items"]
 ├─ Processing                     (BaseAgent → news_processor LLM agent)   enrich items in place
 ├─ Guardrail                      (BaseAgent → faithfulness_critic *)      flag/downrank unfaithful
-├─ DigestEditor                   (BaseAgent → digest_editor LLM agent)    → state["narrative"]
+├─ DigestEditor                   (BaseAgent → digest_editor LLM agent)    narrative → run delta
 └─ Render                         (BaseAgent → render/*)                    md/xlsx/html + finalize
 ```
 `*` = the collector/stage itself calls an LLM (search grounding, YouTube transcript summary, critique).
 
 **Design choice — wrappers, not native sub-agents.** Each stage is a thin `BaseAgent` that calls our **existing, well-tested Python function** (`rss.collect`, `normalize_and_dedup`, `process_items`, `apply_verdicts`, `adk_narrate`, the render writers). The tree provides ADK orchestration (ordering, parallelism, shared state, observability, deployability); the proven functions do the work. This keeps one implementation and keeps every LLM/network call behind an **injectable boundary** so the whole suite runs offline.
 
-### State flow (`ctx.session.state`)
-`SequentialAgent` passes the **same session** to each child, so a value written by one stage is read by the next. Keys: `run_id` → `run` (DigestRun) · `watchlist` · `settings` · `raws_rss|scrape|api|search|youtube` (one per parallel collector — **distinct keys** because `ParallelAgent` children share one state dict) · `items` (list[NewsItem]) · `narrative`. `settings`/`storage` are passed as **constructor fields** on the wrapper agents (infra, not serializable state).
+### State flow (`EventActions.state_delta`)
+`SequentialAgent` passes the **same session** to each child, and the runner applies each child's `EventActions.state_delta` to the session **before the next child runs**. Every cross-stage value travels via `state_delta` as **JSON-serializable** data, so the tree is correct under a persistent session service (`DatabaseSessionService`) — only `state_delta` survives a session reload, so direct `ctx.session.state` mutation would be lost across processes. Keys: `run_id` (str) → `run` (DigestRun dict) · `raws_rss|scrape|api|search|youtube` (one per parallel collector — **distinct keys**, so `ParallelAgent` deltas merge conflict-free) · `errors_raws_*` · `items` (list of NewsItem dicts). Stages read via the tolerant `_read_run`/`_read_items`/`_read_raws` helpers and write via `_run_delta`/`_items_delta`. `settings`/`storage`/`watchlist` are **constructor fields** on the wrapper agents (config/infra, never in session state). See `docs/superpowers/specs/2026-06-17-durable-session-state-design.md`.
 
 ---
 
 ## 3. The LLM agents
 
-All are `Agent(model=settings.llm_model, instruction=<prompt>, output_schema=<Pydantic>, output_key=...)`, run via `adk_runtime.run_agent_text` and validated with `Model.model_validate_json`.
+Structured-output agents use `Agent(model=settings.llm_model, instruction=<prompt>, output_schema=<Pydantic>, output_key=...)`, run via `llm.runtime.run_agent_text`, and are validated with `Model.model_validate_json`. `search_collector` is the tool-only exception (`tools=[google_search]`, no `output_schema`).
 
 | Agent | File | Prompt | `output_schema` | Role |
 |---|---|---|---|---|
@@ -61,7 +61,7 @@ All are `Agent(model=settings.llm_model, instruction=<prompt>, output_schema=<Py
 | `digest_editor` | `app/pipeline/digest_editor.py` | `app/prompts/digest_editor.md` | `DigestNarrative` | "what matters most" briefing |
 | `faithfulness_critic` | `app/pipeline/critic.py` | `app/prompts/critic.md` (+ shared rubric) | `FaithfulnessVerdicts` | runtime fact-check of HIGH/watchlisted summaries |
 | `enrichment_judge` | `app/pipeline/judge.py` | `app/prompts/judge.md` (+ shared rubric) | `EnrichmentVerdicts` | **offline eval** scoring (faithfulness/category/importance/AR) |
-| `youtube_summary` | `app/services/youtube.py` | `app/prompts/youtube_summary.md` | (text) | summarize a video transcript |
+| `youtube_summary` | `app/services/youtube.py` | `app/prompts/youtube_summary.md` | `DigestNarrative` | summarize a video transcript |
 | `search_collector` | `app/services/search.py` | inline | **none** (has `tools=[google_search]`) | grounded web search; we harvest `grounding_metadata` |
 
 The critic and judge **share one rubric** — `app/prompts/faithfulness_rubric.md` is composed into both prompts via a `{{RUBRIC}}` placeholder (single source of truth).
@@ -77,41 +77,50 @@ def run_digest(settings=None, storage=None, processor=None, narrator=None, criti
     settings = settings or Settings(); storage = storage or build_storage(settings)
     run_id = uuid.uuid4().hex[:12]
     tree = build_pipeline(settings, storage, run_id=run_id, processor=processor, narrator=narrator, critic=critic)
+    session_service = make_session_service(settings)   # "database" (default) → DatabaseSessionService; "memory" → InMemory
     try:
-        asyncio.run(_run_tree(tree, run_id))          # build → run the ADK tree
-    except Exception as exc:                           # unexpected error (e.g. render) → FAILED
+        asyncio.run(_run_and_close())                  # run the ADK tree, then dispose the session DB engine
+    except Exception as exc:                            # unexpected error (e.g. render) → FAILED
         run = storage.get_run(run_id)
         if run: run.status = RunStatus.FAILED; run.finished_at = now(); run.source_errors.append({...}); storage.finalize_run(run)
         raise
     return storage.get_run(run_id)                     # RenderAgent finalized it
 
-async def _run_tree(tree, run_id):
-    runner = InMemoryRunner(agent=tree, app_name="catchup")
-    session = await runner.session_service.create_session(app_name="catchup", user_id="system", state={"run_id": run_id})
+async def _run_tree(tree, run_id, session_service):
+    runner = Runner(agent=tree, app_name="catchup", session_service=session_service)
+    session = await session_service.create_session(app_name="catchup", user_id="system", state={"run_id": run_id})
     msg = types.Content(role="user", parts=[types.Part.from_text(text="run")])
     async for _ in runner.run_async(user_id="system", session_id=session.id, new_message=msg): pass
 ```
+- The runtime uses a **persistent** `DatabaseSessionService` by default (`session_backend`/`session_db_url`; SQLite via `aiosqlite`+`greenlet`); tests force `session_backend=memory`. The per-run async engine is disposed in a `finally` so the long-running API process doesn't accumulate connection pools.
 - `run_id` is seeded into the **initial session state**; `PipelineInit` reads it and creates the `DigestRun` (so the delegator can read the finalized run back from storage).
 - The async tree is bridged into sync code with `asyncio.run` (safe — CLI/API run in a sync/threadpool context). The CLI (`app/cli.py`) and the FastAPI endpoint (`POST /api/runs`) both call `run_digest`, so **they run through ADK**.
 
 ### b) Driving a single LLM agent — `run_agent_text`
-`app/pipeline/adk_runtime.py` is the shared sync bridge over `run_async`:
+`app/llm/runtime.py` is the shared sync bridge over `run_async`, with a per-attempt timeout + exponential-backoff retry:
 ```python
 def run_agent_text(agent, payload, settings) -> str:
     ensure_api_key(settings)                           # exports GOOGLE_API_KEY for the genai client
-    return asyncio.run(_run_text_async(agent, payload, app_name="catchup"))
+    for attempt in range(1 + settings.llm_max_retries):
+        try:                                            # _run_coro_sync = loop-aware bridge
+            return _run_coro_sync(                      # (asyncio.run, or a worker loop if one is running)
+                _run_text_async(agent, payload, timeout=settings.llm_timeout))
+        except Exception:
+            ...                                         # backoff + retry; re-raise the last on exhaustion
 
-async def _run_text_async(agent, payload, *, app_name="catchup"):
-    runner = InMemoryRunner(agent=agent, app_name=app_name)
-    session = await runner.session_service.create_session(app_name=app_name, user_id="system")
-    msg = types.Content(role="user", parts=[types.Part.from_text(text=payload)])
-    text = ""
-    async for event in runner.run_async(user_id="system", session_id=session.id, new_message=msg):
-        if event.is_final_response() and event.content and event.content.parts:
-            text = event.content.parts[0].text or ""
-    return text
+async def _run_text_async(agent, payload, *, app_name="catchup", timeout=None):
+    async def _consume():
+        runner = InMemoryRunner(agent=agent, app_name=app_name)   # one-off: in-memory is fine
+        session = await runner.session_service.create_session(app_name=app_name, user_id="system")
+        msg = types.Content(role="user", parts=[types.Part.from_text(text=payload)])
+        text = ""
+        async for event in runner.run_async(user_id="system", session_id=session.id, new_message=msg):
+            if event.is_final_response() and event.content and event.content.parts:
+                text = event.content.parts[0].text or ""
+        return text
+    return await (_consume() if timeout is None else asyncio.wait_for(_consume(), timeout))
 ```
-The processing/editor/critic/judge agents call this and parse the returned JSON against their `output_schema`.
+The processing/editor/critic/judge agents call this and parse the returned JSON against their `output_schema`. (These are stateless single-agent calls, so they keep `InMemoryRunner`; only the durable pipeline uses the persistent session service.)
 
 ### c) A custom stage agent — the `BaseAgent` pattern
 ```python
@@ -121,12 +130,14 @@ class NormalizeDedupAgent(BaseAgent):
     storage: StorageBackend
     async def _run_async_impl(self, ctx) -> AsyncGenerator[Event, None]:
         state = ctx.session.state
-        run = state["run"]
-        all_raws = [r for k in (...) for r in (state.get(k) or [])]
+        run = _read_run(state)                            # tolerant: JSON dict OR live object
+        all_raws = [r for st in COLLECTED_SOURCE_TYPES
+                    for r in _read_raws(state, state_key_for(st))]
         run.collected = len(all_raws)
-        state["items"] = normalize_and_dedup(all_raws, self.storage, run.run_id)
-        run.new = len(state["items"])
-        yield _make_event(ctx, self.name)
+        items = normalize_and_dedup(all_raws, self.storage, run.run_id)
+        run.new = len(items)
+        # Durable values travel via state_delta (JSON) — never direct mutation:
+        yield _make_event(ctx, self.name, {**_run_delta(run), **_items_delta(items)})
 ```
 
 ### d) Exposure to `adk run` / `adk web`
@@ -142,7 +153,7 @@ Tests inject fakes (synthetic Pydantic results / fixtures), so the **full suite 
 ---
 
 ## 6. Free tier vs. production (provider swap)
-- **Free / local (v1):** a Google **AI Studio** key in `app/.env` as `GOOGLE_API_KEY`. `ensure_api_key()` exports it for the `google-genai` client. SQLite storage, in-memory sessions.
+- **Free / local (v1):** a Google **AI Studio** key in `app/.env` as `GOOGLE_API_KEY`. `ensure_api_key()` exports it for the `google-genai` client. SQLite storage; the pipeline runs on a persistent SQLite-backed `DatabaseSessionService` by default (`session_backend`; tests force `memory`).
 - **Production:** flip to **Vertex AI** via `GOOGLE_GENAI_USE_VERTEXAI=TRUE` (+ project/location), Firestore-backed storage, and deploy the `App` (Agent Engine / Cloud Run) — the agent tree is what gets deployed. No pipeline rewrite (swap-points are behind interfaces).
 
 ---

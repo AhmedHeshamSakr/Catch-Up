@@ -3,8 +3,14 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
-from google.adk.runners import InMemoryRunner
+from google.adk.runners import Runner
+from google.adk.sessions import (
+    BaseSessionService,
+    DatabaseSessionService,
+    InMemorySessionService,
+)
 from google.genai import types
 
 from app.adapters.storage.sqlite_backend import SqliteBackend
@@ -35,6 +41,22 @@ def build_storage(settings: Settings) -> StorageBackend:
     backend = SqliteBackend(settings.sqlite_path)
     backend.init_schema()
     return backend
+
+
+def _resolve_session_db_url(settings: Settings) -> str:
+    """Effective ADK session DB URL. Empty session_db_url => a local SQLite file
+    next to sqlite_path (separate from the app DB; ADK owns its own schema)."""
+    if settings.session_db_url:
+        return settings.session_db_url
+    db_path = Path(settings.sqlite_path).resolve().parent / "sessions.db"
+    return f"sqlite+aiosqlite:///{db_path}"
+
+
+def make_session_service(settings: Settings) -> BaseSessionService:
+    """Build the ADK session service for a run from settings.session_backend."""
+    if settings.session_backend == "memory":
+        return InMemorySessionService()
+    return DatabaseSessionService(db_url=_resolve_session_db_url(settings))
 
 
 def _collect(source: SourceConfig, settings: Settings, storage: StorageBackend | None = None) -> list[RawItem]:
@@ -72,9 +94,9 @@ def select_rendered(items: list[NewsItem]) -> list[NewsItem]:
     return [i for i in items if i.status == "processed"] or [i for i in items if i.status != "flagged"]
 
 
-async def _run_tree(tree, run_id: str) -> None:
-    runner = InMemoryRunner(agent=tree, app_name="catchup")
-    session = await runner.session_service.create_session(
+async def _run_tree(tree, run_id: str, session_service) -> None:
+    runner = Runner(agent=tree, app_name="catchup", session_service=session_service)
+    session = await session_service.create_session(
         app_name="catchup", user_id="system", state={"run_id": run_id}
     )
     msg = types.Content(role="user", parts=[types.Part.from_text(text="run")])
@@ -82,7 +104,7 @@ async def _run_tree(tree, run_id: str) -> None:
         pass
 
 
-async def _run_tree_with_timeout(tree, run_id: str, timeout: float | None) -> None:
+async def _run_tree_with_timeout(tree, run_id: str, session_service, timeout: float | None) -> None:
     """Run the tree, optionally capped by a run-level wall-clock timeout.
 
     On timeout, ``asyncio.wait_for`` raises ``TimeoutError`` — caught by
@@ -97,9 +119,9 @@ async def _run_tree_with_timeout(tree, run_id: str, timeout: float | None) -> No
     FAILED path and never persisted (RenderAgent doesn't run), so it's discarded.
     """
     if timeout is None:
-        await _run_tree(tree, run_id)
+        await _run_tree(tree, run_id, session_service)
     else:
-        await asyncio.wait_for(_run_tree(tree, run_id), timeout=timeout)
+        await asyncio.wait_for(_run_tree(tree, run_id, session_service), timeout=timeout)
 
 
 def run_digest(
@@ -129,8 +151,23 @@ def run_digest(
         critic=critic,
         reprocessor=reprocessor,
     )
+    session_service = make_session_service(settings)
+
+    async def _run_and_close() -> None:
+        # Dispose the session service's DB engine in the SAME loop it was used in
+        # (DatabaseSessionService opens a SQLAlchemy async engine per run); without
+        # this the long-running API process would accumulate connection pools.
+        try:
+            await _run_tree_with_timeout(
+                tree, run_id, session_service, settings.run_timeout
+            )
+        finally:
+            engine = getattr(session_service, "db_engine", None)
+            if engine is not None:
+                await engine.dispose()
+
     try:
-        asyncio.run(_run_tree_with_timeout(tree, run_id, settings.run_timeout))
+        asyncio.run(_run_and_close())
     except Exception as exc:
         run = storage.get_run(run_id)
         if run is not None:

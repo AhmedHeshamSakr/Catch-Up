@@ -32,6 +32,8 @@ from app.pipeline.agents import (
     ProcessingAgent,
     RenderAgent,
     SourceCollectorAgent,
+    _read_items,
+    _read_raws,
     build_pipeline,
 )
 from app.pipeline.eval_schema import FaithfulnessVerdict
@@ -114,9 +116,20 @@ def _storage(tmp_path) -> SqliteBackend:
 
 
 async def _run(agent, state: dict) -> list:
-    """Drive an agent's _run_async_impl with a fake ctx, collect events."""
+    """Drive an agent's _run_async_impl with a fake ctx, collect events, and
+    apply any EventActions.state_delta to ``state`` in place — mimicking the ADK
+    Runner so a single-agent unit test stays valid as stages move from direct
+    state mutation to state_delta.
+
+    NB: a flat dict.update() is faithful ONLY for this pipeline's unprefixed
+    keys. It does NOT model ADK's 'temp:'/'user:'/'app:' prefix semantics."""
     ctx = _ctx(state)
-    return [e async for e in agent._run_async_impl(ctx)]
+    events = []
+    async for e in agent._run_async_impl(ctx):
+        events.append(e)
+        if e.actions and e.actions.state_delta:
+            state.update(e.actions.state_delta)
+    return events
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +137,7 @@ async def _run(agent, state: dict) -> list:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_pipeline_init_seeds_run_and_watchlist(tmp_path):
+async def test_pipeline_init_emits_run_delta_no_object_seeds(tmp_path):
     settings = _settings(tmp_path)
     storage = _storage(tmp_path)
 
@@ -134,16 +147,37 @@ async def test_pipeline_init_seeds_run_and_watchlist(tmp_path):
     events = await _run(agent, state)
 
     assert len(events) == 1
-    assert isinstance(state["run"], DigestRun)
-    assert state["run"].run_id == "abc123"
-    assert state["run"].status == RunStatus.RUNNING
-    assert isinstance(state["watchlist"], Watchlist)
-    assert state["settings"] is settings
+    delta = events[-1].actions.state_delta
+    assert delta["run_id"] == "abc123"
+    assert delta["run"]["run_id"] == "abc123"
+    assert delta["run"]["status"] == "running"
+    # The delta-applied state holds JSON, not a live DigestRun object.
+    assert isinstance(state["run"], dict)
+    # settings/storage/watchlist are constructor-injected, never seeded into state.
+    assert "settings" not in delta and "watchlist" not in delta
+    assert "settings" not in state and "watchlist" not in state
 
     # Run must be persisted in storage
     saved = storage.get_run("abc123")
     assert saved is not None
     assert saved.run_id == "abc123"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_init_generates_run_id_when_absent(tmp_path):
+    settings = _settings(tmp_path)
+    storage = _storage(tmp_path)
+
+    agent = PipelineInitAgent(name="PipelineInit", settings=settings, storage=storage)
+    state: dict = {}  # no run_id seeded
+
+    events = await _run(agent, state)
+
+    delta = events[-1].actions.state_delta
+    # A run_id is generated and travels in the delta (no direct state mutation).
+    assert delta["run_id"]
+    assert delta["run"]["run_id"] == delta["run_id"]
+    assert storage.get_run(delta["run_id"]) is not None
 
 
 @pytest.mark.asyncio
@@ -186,8 +220,9 @@ async def test_source_collector_writes_raws_for_matching_type(tmp_path):
 
     assert len(events) == 1
     # rss-src matches; api-src does not; disabled-src skipped
-    assert len(state["raws_rss"]) == 1
-    assert state["raws_rss"][0].url == "https://x.com/rss-src"
+    raws = _read_raws(state, "raws_rss")
+    assert len(raws) == 1
+    assert raws[0].url == "https://x.com/rss-src"
 
 
 @pytest.mark.asyncio
@@ -288,6 +323,25 @@ async def test_source_collector_different_types_use_distinct_keys(tmp_path):
     assert "raws_rss" not in state
 
 
+@pytest.mark.asyncio
+async def test_collector_emits_raws_delta_as_dicts(tmp_path):
+    settings = _settings(tmp_path)
+    storage = _storage(tmp_path)
+    state: dict = {}
+
+    agent = SourceCollectorAgent(
+        name="CollectRss", source_type=SourceType.RSS, state_key="raws_rss",
+        settings=settings, storage=storage,
+        collect_fn=lambda src, s, st=None: [_raw("https://x/1", "T")],
+    )
+    events = await _run(agent, state)
+
+    delta = events[-1].actions.state_delta
+    assert isinstance(delta["raws_rss"], list) and isinstance(delta["raws_rss"][0], dict)
+    assert delta["raws_rss"][0]["url"] == "https://x/1"
+    assert delta["errors_raws_rss"] == []
+
+
 # ---------------------------------------------------------------------------
 # NormalizeDedupAgent
 # ---------------------------------------------------------------------------
@@ -342,8 +396,9 @@ async def test_normalize_dedup_filters_existing_in_storage(tmp_path):
 
     assert run.collected == 2
     assert run.new == 1  # only the new article
-    assert len(state["items"]) == 1
-    assert state["items"][0].url == "https://b.com/1"
+    items = _read_items(state)
+    assert len(items) == 1
+    assert items[0].url == "https://b.com/1"
 
 
 @pytest.mark.asyncio
@@ -362,6 +417,32 @@ async def test_normalize_dedup_missing_raws_keys_treated_as_empty(tmp_path):
     assert run.collected == 0
     assert run.new == 0
     assert state["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_normalize_emits_run_and_items_delta(tmp_path):
+    settings = _settings(tmp_path)
+    storage = _storage(tmp_path)
+
+    run = DigestRun(run_id="r1")
+    storage.create_run(run)
+    state = {
+        "run": run,
+        "raws_rss": [_raw("https://x/1", "T")],
+        "errors_raws_rss": [{"source_id": "rss-src", "error": "boom", "ts": "t"}],
+    }
+
+    agent = NormalizeDedupAgent(name="NormalizeDedup", settings=settings, storage=storage)
+    events = await _run(agent, state)
+
+    delta = events[-1].actions.state_delta
+    assert delta["run"]["collected"] == 1
+    assert delta["run"]["new"] == 1
+    assert len(delta["items"]) == 1 and isinstance(delta["items"][0], dict)
+    # Merged per-source collector errors are serialized in the run delta.
+    assert delta["run"]["source_errors"] == [
+        {"source_id": "rss-src", "error": "boom", "ts": "t"}
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -400,6 +481,7 @@ async def test_processing_agent_sets_item_statuses(tmp_path):
         settings=settings,
         storage=storage,
         processor=fake_processor,
+        watchlist=Watchlist(),
     )
     events = await _run(agent, state)
 
@@ -429,6 +511,7 @@ async def test_processing_agent_failure_adds_stage_error(tmp_path):
         settings=settings,
         storage=storage,
         processor=boom_processor,
+        watchlist=Watchlist(),
     )
     events = await _run(agent, state)
 
@@ -436,6 +519,36 @@ async def test_processing_agent_failure_adds_stage_error(tmp_path):
     assert len(run.source_errors) == 1
     assert run.source_errors[0]["stage"] == "processing"
     assert "LLM quota exhausted" in run.source_errors[0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_processing_emits_run_and_items_delta_using_injected_watchlist(tmp_path):
+    settings = _settings(tmp_path)
+    storage = _storage(tmp_path)
+
+    item = _news("https://a.com/1", "OpenAI launch")
+    run = DigestRun(run_id="r1")
+    # No "watchlist" key in state — the agent must use its injected watchlist.
+    state = {"run": run, "items": [item]}
+
+    def fake_processor(batch):
+        return ProcessingResult(items=[ItemEnrichment(
+            id=it.id, category=Category.AI_TECH, importance_score=0.9,
+            summary_en="S", summary_ar="ملخص", entities=[], sentiment="neutral",
+        ) for it in batch])
+
+    agent = ProcessingAgent(
+        name="Processing", settings=settings, storage=storage,
+        processor=fake_processor, watchlist=Watchlist(),
+    )
+    events = await _run(agent, state)
+
+    delta = events[-1].actions.state_delta
+    assert "run" in delta and "items" in delta
+    assert isinstance(delta["items"][0], dict)
+    # The enriched (in-place mutated) item is what got serialized.
+    assert delta["items"][0]["status"] == "processed"
+    assert delta["items"][0]["importance_score"] == 0.9
 
 
 # ---------------------------------------------------------------------------
@@ -474,6 +587,7 @@ async def test_guardrail_critic_flags_unfaithful_item(tmp_path):
         storage=storage,
         critic=fake_critic,
         reprocessor=_fake_reprocessor,
+        watchlist=Watchlist(),
     )
     await _run(agent, state)
 
@@ -509,6 +623,7 @@ async def test_guardrail_critic_faithful_item_untouched(tmp_path):
         storage=storage,
         critic=fake_critic,
         reprocessor=_fake_reprocessor,
+        watchlist=Watchlist(),
     )
     await _run(agent, state)
 
@@ -544,6 +659,7 @@ async def test_guardrail_critic_raises_adds_stage_error(tmp_path):
         storage=storage,
         critic=boom_critic,
         reprocessor=_fake_reprocessor,
+        watchlist=Watchlist(),
     )
     events = await _run(agent, state)
 
@@ -582,10 +698,45 @@ async def test_guardrail_critic_disabled_skips_selection(tmp_path):
         storage=storage,
         critic=tracking_critic,
         reprocessor=_fake_reprocessor,
+        watchlist=Watchlist(),
     )
     await _run(agent, state)
 
     assert critic_called == []  # critic_enabled=False → nothing selected → critic not called
+
+
+@pytest.mark.asyncio
+async def test_critic_emits_run_and_items_delta_using_injected_watchlist(tmp_path):
+    settings = _settings(tmp_path, critic_enabled=True, critic_action="downrank",
+                         critic_min_importance="high")
+    storage = _storage(tmp_path)
+
+    item = _news("https://a.com/1", "Test")
+    item.importance = Importance.HIGH
+    item.importance_score = 0.9
+    item.status = "processed"
+
+    run = DigestRun(run_id="r1")
+    # No "watchlist" key in state — the agent must use its injected watchlist.
+    state = {"run": run, "items": [item]}
+
+    def fake_critic(items):
+        return [FaithfulnessVerdict(item_id=items[0].id, faithful=False, issues=["x"])]
+
+    agent = GuardrailCriticAgent(
+        name="GuardrailCritic", settings=settings, storage=storage,
+        critic=fake_critic, reprocessor=_fake_reprocessor,
+        watchlist=Watchlist(),
+    )
+    events = await _run(agent, state)
+
+    delta = events[-1].actions.state_delta
+    assert "run" in delta and "items" in delta
+    assert isinstance(delta["items"], list) and isinstance(delta["items"][0], dict)
+    assert delta["run"]["flagged"] == 1
+    # The SERIALIZED item is the one the critic mutated (downrank → flagged),
+    # proving _read_items copies are what get re-serialized in the delta.
+    assert delta["items"][0]["status"] == "flagged"
 
 
 # ---------------------------------------------------------------------------
@@ -613,10 +764,11 @@ async def test_digest_editor_sets_narrative(tmp_path):
         storage=storage,
         narrator=lambda items: "Today's digest.",
     )
-    await _run(agent, state)
+    events = await _run(agent, state)
 
     assert run.narrative == "Today's digest."
-    assert state["narrative"] == "Today's digest."
+    # The narrative now travels inside the run delta (not a separate state key).
+    assert events[-1].actions.state_delta["run"]["narrative"] == "Today's digest."
 
 
 @pytest.mark.asyncio
@@ -687,6 +839,30 @@ async def test_digest_editor_narrator_failure_adds_stage_error(tmp_path):
     assert len(run.source_errors) == 1
     assert run.source_errors[0]["stage"] == "narrative"
     assert "narrator quota exhausted" in run.source_errors[0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_digest_editor_emits_run_delta_with_narrative(tmp_path):
+    settings = _settings(tmp_path)
+    storage = _storage(tmp_path)
+
+    item = _news("https://a.com/1", "Test")
+    item.status = "processed"
+
+    run = DigestRun(run_id="r1")
+    state = {"run": run, "watchlist": Watchlist(), "items": [item]}
+
+    agent = DigestEditorAgent(
+        name="DigestEditor", settings=settings, storage=storage,
+        narrator=lambda items: "A narrative.",
+    )
+    events = await _run(agent, state)
+
+    delta = events[-1].actions.state_delta
+    assert delta["run"]["narrative"] == "A narrative."
+    # The vestigial standalone narrative key is gone — only the run delta carries it.
+    assert "narrative" not in delta
+    assert "narrative" not in state
 
 
 # ---------------------------------------------------------------------------
@@ -787,6 +963,32 @@ async def test_render_agent_excludes_flagged_from_render(tmp_path):
     md = Path(run.outputs["md"]).read_text(encoding="utf-8")
     assert "Good summary." in md
     assert "Hallucinated summary." not in md
+
+
+@pytest.mark.asyncio
+async def test_render_emits_run_delta(tmp_path):
+    settings = _settings(tmp_path)
+    storage = _storage(tmp_path)
+
+    item = _news("https://a.com/1", "OpenAI article")
+    item.status = "processed"
+    item.summary_en = "A summary."
+
+    run = DigestRun(run_id="r1")
+    storage.create_run(run)
+    state = {"run": run, "watchlist": Watchlist(), "items": [item]}
+
+    agent = RenderAgent(name="Render", settings=settings, storage=storage)
+    events = await _run(agent, state)
+
+    delta = events[-1].actions.state_delta
+    assert "run" in delta and isinstance(delta["run"], dict)
+    # No source_errors → the finalized run is exactly SUCCESS, fully serialized.
+    assert delta["run"]["status"] == "success"
+    assert delta["run"]["finished_at"] is not None
+    assert {"md", "xlsx", "html"} <= set(delta["run"]["outputs"])
+    # The emitted delta is a round-trippable, finalized DigestRun.
+    assert DigestRun.model_validate(delta["run"]).status == RunStatus.SUCCESS
 
 
 # ---------------------------------------------------------------------------
@@ -976,7 +1178,7 @@ async def test_processing_agent_runs_processor_off_the_event_loop(tmp_path):
         )])
 
     agent = ProcessingAgent(name="Processing", settings=settings, storage=storage,
-                            processor=blocking_processor)
+                            processor=blocking_processor, watchlist=Watchlist())
     stage = asyncio.create_task(_run(agent, state))
     try:
         for _ in range(200):

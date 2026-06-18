@@ -1,17 +1,18 @@
 """ADK agent wrappers for the NewsCatchUp pipeline.
 
 Each wrapper is a thin BaseAgent subclass that reads state from
-ctx.session.state, calls the existing proven functions, and writes
-results back to state. No LLM calls — all orchestration logic only.
+ctx.session.state, calls the existing proven functions, and writes results
+back via EventActions.state_delta. No LLM calls — all orchestration only.
 
-State-propagation decision: the pipeline runs against a single in-process
-session (InMemoryRunner / InMemorySessionService), so agents mutate
-``ctx.session.state`` directly and emit a plain terminal Event with no
-``EventActions.state_delta``. This is intentional — the empty state_delta the
-runner would persist is dead plumbing here. When a persistent/distributed
-session service (Firestore / Vertex Agent Engine — Plan 9) is introduced,
-durable values that must survive across processes will need to move into
-``state_delta`` so the session service persists them.
+State-propagation: every cross-stage value travels via
+``EventActions.state_delta`` as JSON-serializable data (run/items/raws as
+``model_dump`` dicts). settings, storage and the watchlist are
+constructor-injected, never stored in the session. This makes the tree correct
+under a persistent session service (DatabaseSessionService) — only
+``state_delta`` survives a session reload, so direct ``ctx.session.state``
+mutation would be lost across processes. The ``_read_*`` helpers stay tolerant
+of a live object OR a dict so the migration could land stage-by-stage.
+See docs/superpowers/specs/2026-06-17-durable-session-state-design.md.
 """
 from __future__ import annotations
 
@@ -23,10 +24,18 @@ from typing import TYPE_CHECKING, Any
 from google.adk.agents import ParallelAgent, SequentialAgent
 from google.adk.agents.base_agent import BaseAgent
 from google.adk.events.event import Event
+from google.adk.events.event_actions import EventActions
 from pydantic import ConfigDict
 
 from app.core.config import Settings, load_sources
-from app.core.domain import DigestRun, Importance, NewsItem, RunStatus, SourceType
+from app.core.domain import (
+    DigestRun,
+    Importance,
+    NewsItem,
+    RawItem,
+    RunStatus,
+    SourceType,
+)
 from app.core.ports.storage import StorageBackend
 from app.pipeline.critic import (
     apply_verdicts,
@@ -46,7 +55,7 @@ from app.runner import (
 from app.services import normalize as normalize_svc
 from app.services.render import excel, markdown
 from app.services.render import html as html_render
-from app.services.watchlist import load_watchlist
+from app.services.watchlist import Watchlist, load_watchlist
 
 if TYPE_CHECKING:
     from google.adk.agents.invocation_context import InvocationContext
@@ -91,18 +100,49 @@ def _now_dt() -> datetime:
     return datetime.now(UTC)
 
 
-def _make_event(ctx: Any, author: str) -> Event:
-    """Build a minimal terminal pipeline event.
+def _make_event(ctx: Any, author: str, state_delta: dict | None = None) -> Event:
+    """Build a terminal pipeline event.
 
-    Agents mutate ``ctx.session.state`` directly (single in-process session),
-    so no ``EventActions.state_delta`` is attached — see the module docstring
-    for the durable-session migration note.
+    Durable cross-stage values travel via ``EventActions.state_delta`` so the
+    pipeline is correct under a persistent session service (the runner applies
+    each event's delta to the session before the next agent runs). Pass the keys
+    this stage changed; omit for a stage that changes nothing.
     """
     return Event(
         invocation_id=ctx.invocation_id,
         author=author,
         branch=ctx.branch,
+        actions=EventActions(state_delta=state_delta or {}),
     )
+
+
+def _read_run(state: Any) -> DigestRun:
+    """Read the run from state, tolerant of either a JSON dict (persistent /
+    post-migration) or a live DigestRun (in-process / pre-migration)."""
+    r = state["run"]
+    return DigestRun.model_validate(r) if isinstance(r, dict) else r
+
+
+def _read_items(state: Any) -> list[NewsItem]:
+    return [
+        NewsItem.model_validate(x) if isinstance(x, dict) else x
+        for x in (state.get("items") or [])
+    ]
+
+
+def _read_raws(state: Any, key: str) -> list[RawItem]:
+    return [
+        RawItem.model_validate(x) if isinstance(x, dict) else x
+        for x in (state.get(key) or [])
+    ]
+
+
+def _run_delta(run: DigestRun) -> dict:
+    return {"run": run.model_dump(mode="json")}
+
+
+def _items_delta(items: list[NewsItem]) -> dict:
+    return {"items": [i.model_dump(mode="json") for i in items]}
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +150,7 @@ def _make_event(ctx: Any, author: str) -> Event:
 # ---------------------------------------------------------------------------
 
 class PipelineInitAgent(BaseAgent):
-    """Seeds DigestRun and watchlist into session state."""
+    """Creates the DigestRun and seeds it (with run_id) via state_delta."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
@@ -126,17 +166,14 @@ class PipelineInitAgent(BaseAgent):
             import uuid
 
             run_id = uuid.uuid4().hex[:12]
-            state["run_id"] = run_id
         run = DigestRun(run_id=run_id)
         self.storage.create_run(run)
 
-        wl = load_watchlist(self.settings.config_dir)
-
-        state["run"] = run
-        state["watchlist"] = wl
-        state["settings"] = self.settings
-
-        yield _make_event(ctx, self.name)
+        # settings/storage are constructor-injected; watchlist is injected into the
+        # stages that need it (Processing/Critic). Seed only durable, JSON-
+        # serializable run state. run_id always travels in the delta (no direct
+        # state mutation) so it persists under a persistent session service.
+        yield _make_event(ctx, self.name, {"run_id": run_id, **_run_delta(run)})
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +194,7 @@ class SourceCollectorAgent(BaseAgent):
     async def _run_async_impl(
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
-        state = ctx.session.state
+        # Reads only config (load_sources); writes its own keys via state_delta.
         raws = []
         errors: list[dict] = []
 
@@ -178,12 +215,16 @@ class SourceCollectorAgent(BaseAgent):
                     {"source_id": source.id, "error": str(exc), "ts": _now()}
                 )
 
-        # Each parallel collector writes ONLY its own keys; NormalizeDedup
-        # merges the per-source errors into run.source_errors single-threaded.
-        state[self.state_key] = raws
-        state[f"errors_{self.state_key}"] = errors
-
-        yield _make_event(ctx, self.name)
+        # Each parallel collector writes ONLY its own keys via state_delta;
+        # NormalizeDedup merges the per-source errors into run.source_errors.
+        # Distinct keys per branch → ADK's parallel state merge is conflict-free.
+        yield _make_event(
+            ctx, self.name,
+            {
+                self.state_key: [r.model_dump(mode="json") for r in raws],
+                f"errors_{self.state_key}": errors,
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -202,21 +243,20 @@ class NormalizeDedupAgent(BaseAgent):
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
         state = ctx.session.state
-        run: DigestRun = state["run"]
+        run = _read_run(state)
 
         all_raws = []
         for source_type in COLLECTED_SOURCE_TYPES:
             key = state_key_for(source_type)
-            all_raws.extend(state.get(key) or [])
+            all_raws.extend(_read_raws(state, key))
             # Merge per-source collector errors (safe: this stage is single-threaded).
             run.source_errors.extend(state.get(f"errors_{key}") or [])
 
         run.collected = len(all_raws)
         items = normalize_svc.normalize_and_dedup(all_raws, self.storage, run.run_id)
         run.new = len(items)
-        state["items"] = items
 
-        yield _make_event(ctx, self.name)
+        yield _make_event(ctx, self.name, {**_run_delta(run), **_items_delta(items)})
 
 
 # ---------------------------------------------------------------------------
@@ -231,14 +271,15 @@ class ProcessingAgent(BaseAgent):
     settings: Settings
     storage: StorageBackend
     processor: Callable
+    watchlist: Watchlist
 
     async def _run_async_impl(
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
         state = ctx.session.state
-        run: DigestRun = state["run"]
-        items: list[NewsItem] = state.get("items") or []
-        watchlist = state["watchlist"]
+        run = _read_run(state)
+        items = _read_items(state)
+        watchlist = self.watchlist
 
         try:
             # Run the blocking LLM batch off the event loop so the loop stays
@@ -265,7 +306,7 @@ class ProcessingAgent(BaseAgent):
                 {"stage": "processing", "error": str(exc), "ts": _now()}
             )
 
-        yield _make_event(ctx, self.name)
+        yield _make_event(ctx, self.name, {**_run_delta(run), **_items_delta(items)})
 
 
 # ---------------------------------------------------------------------------
@@ -281,14 +322,15 @@ class GuardrailCriticAgent(BaseAgent):
     storage: StorageBackend
     critic: Callable
     reprocessor: Callable
+    watchlist: Watchlist
 
     async def _run_async_impl(
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
         state = ctx.session.state
-        run: DigestRun = state["run"]
-        items: list[NewsItem] = state.get("items") or []
-        watchlist = state["watchlist"]
+        run = _read_run(state)
+        items = _read_items(state)
+        watchlist = self.watchlist
 
         selected = select_for_critique(items, watchlist, self.settings)
         try:
@@ -328,7 +370,7 @@ class GuardrailCriticAgent(BaseAgent):
                     redact_unfaithful(item)
                 run.flagged = len(selected)
 
-        yield _make_event(ctx, self.name)
+        yield _make_event(ctx, self.name, {**_run_delta(run), **_items_delta(items)})
 
 
 # ---------------------------------------------------------------------------
@@ -348,8 +390,8 @@ class DigestEditorAgent(BaseAgent):
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
         state = ctx.session.state
-        run: DigestRun = state["run"]
-        items: list[NewsItem] = state.get("items") or []
+        run = _read_run(state)
+        items = _read_items(state)
         rendered = select_rendered(items)
 
         try:
@@ -362,9 +404,9 @@ class DigestEditorAgent(BaseAgent):
                 {"stage": "narrative", "error": str(exc), "ts": _now()}
             )
 
-        state["narrative"] = run.narrative
-
-        yield _make_event(ctx, self.name)
+        # run.narrative was set above; it travels in the run delta. The old
+        # standalone state["narrative"] key was vestigial (Render reads run.narrative).
+        yield _make_event(ctx, self.name, _run_delta(run))
 
 
 # ---------------------------------------------------------------------------
@@ -383,8 +425,8 @@ class RenderAgent(BaseAgent):
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
         state = ctx.session.state
-        run: DigestRun = state["run"]
-        items: list[NewsItem] = state.get("items") or []
+        run = _read_run(state)
+        items = _read_items(state)
 
         run.processed = sum(1 for i in items if i.status == "processed")
         run.high_importance = sum(1 for i in items if i.importance == Importance.HIGH)
@@ -401,7 +443,7 @@ class RenderAgent(BaseAgent):
         run.finished_at = _now_dt()
         self.storage.finalize_run(run)
 
-        yield _make_event(ctx, self.name)
+        yield _make_event(ctx, self.name, _run_delta(run))
 
 
 # ---------------------------------------------------------------------------
@@ -434,6 +476,10 @@ def build_pipeline(
     _narrator = narrator or _default_narrator(settings)
     _critic = critic or _default_critic(settings)
     _reprocessor = reprocessor or _default_reprocessor(settings)
+
+    # Watchlist is config, not run state: load it once here and inject it into
+    # the stages that need it (Processing + Critic) instead of seeding the session.
+    watchlist = load_watchlist(settings.config_dir)
 
     # Build one collector per collected SourceType from the shared
     # source-of-truth, so the node keys and the NormalizeDedup merge keys can
@@ -472,6 +518,7 @@ def build_pipeline(
                 settings=settings,
                 storage=storage,
                 processor=_processor,
+                watchlist=watchlist,
             ),
             GuardrailCriticAgent(
                 name="GuardrailCritic",
@@ -479,6 +526,7 @@ def build_pipeline(
                 storage=storage,
                 critic=_critic,
                 reprocessor=_reprocessor,
+                watchlist=watchlist,
             ),
             DigestEditorAgent(
                 name="DigestEditor",
