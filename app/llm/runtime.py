@@ -33,10 +33,29 @@ def _run_coro_sync(coro: Coroutine[object, object, _T]) -> _T:
         return executor.submit(lambda: asyncio.run(coro)).result()
 
 
-def ensure_api_key(settings: Settings) -> None:
-    """ADK's google client reads GOOGLE_API_KEY from the process env."""
+def configure_genai(settings: Settings) -> None:
+    """Configure the google-genai client env for AI Studio (default) or Vertex.
+
+    Never overwrites a value already in os.environ (respects operator-set env).
+    Uses getattr defaults so minimal test settings-stubs (which only define
+    google_api_key) keep working — see tests/integration/test_pipeline_live_bridge.py.
+    """
+    if getattr(settings, "use_vertexai", False):
+        project = getattr(settings, "google_cloud_project", "")
+        if not project:
+            raise ValueError("use_vertexai=True requires google_cloud_project")
+        location = getattr(settings, "google_cloud_location", "global")
+        os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "TRUE")
+        os.environ.setdefault("GOOGLE_CLOUD_PROJECT", project)
+        os.environ.setdefault("GOOGLE_CLOUD_LOCATION", location)
+        return
+    # AI Studio (unchanged): the google client reads GOOGLE_API_KEY from the env.
     if settings.google_api_key and not os.environ.get("GOOGLE_API_KEY"):
         os.environ["GOOGLE_API_KEY"] = settings.google_api_key
+
+
+# Back-compat alias — existing call-sites/tests import ``ensure_api_key``.
+ensure_api_key = configure_genai
 
 
 async def _run_text_async(
@@ -70,7 +89,7 @@ def run_agent_text(
     timeouts) with exponential backoff plus jitter before re-raising the last
     exception.
     """
-    ensure_api_key(settings)
+    configure_genai(settings)
     attempts = 1 + max(0, settings.llm_max_retries)
     last_exc: BaseException | None = None
     for attempt in range(attempts):
