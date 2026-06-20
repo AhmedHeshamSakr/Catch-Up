@@ -1,7 +1,6 @@
 """Tests for the local desktop Settings surface: /api/health marker, and the
 GET/PUT /api/settings routes with their localhost-only write guard."""
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.api.app import create_app

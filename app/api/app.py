@@ -23,7 +23,13 @@ from pydantic import BaseModel, Field
 
 from app.api.schemas import DashboardOut, ResolveIn, ResolveOut, RunDetail
 from app.api.static import mount_console
-from app.core.config import REPO_ROOT, Settings, SourceConfig, detect_env_shadow, load_sources
+from app.core.config import (
+    REPO_ROOT,
+    Settings,
+    SourceConfig,
+    detect_env_shadow,
+    load_sources,
+)
 from app.core.domain import Category, Importance
 from app.core.env_store import upsert_env
 from app.llm.runtime import configure_genai
