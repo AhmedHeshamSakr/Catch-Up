@@ -4,7 +4,8 @@
 - **HEAD reviewed:** d955e5b (spec round 1)
 - **Reviewer:** `codex exec --sandbox read-only` (codex-cli 0.140.0)
 - **Date (UTC):** 2026-06-20T10:44:38Z
-- **Verdict:** round 1 = NOT READY (1 blocker, 6 high, 3 medium). All FIXED in spec revision; re-review pending.
+- **Verdict:** round 1 = NOT READY (1 blocker, 6 high, 3 medium). All FIXED in spec revision (commit 96cf625).
+- **Round 2 re-review:** **VERDICT: READY** — no remaining blocker/high. Codex confirmed `NEXT_PUBLIC_API_BASE=""` stays `""` (relative, via `??`), `/digests?run=` removes the export blocker, resolver/traversal/`/api` exclusion sound, TrustedHost+Origin guard sufficient for the localhost threat model, `os.environ` overwrite required, atomic env writer + health marker adequate, uvicorn importing `app` at start is status quo (not a regression).
 
 | # | Finding | Codex conf | Severity | Disposition |
 |---|---|---|---|---|
