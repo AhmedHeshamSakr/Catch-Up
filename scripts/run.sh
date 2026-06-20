@@ -88,15 +88,21 @@ fi
 LOCK="$RUN_DIR/launch.lock"
 OWNER="$LOCK/owner.pid"
 acquire_lock() {
-  local i owner
+  local i owner ownerless=0
   for i in $(seq 1 600); do   # up to ~3 min (covers the first-run build)
     if mkdir "$LOCK" 2>/dev/null; then echo $$ >"$OWNER"; return 0; fi
     if is_our_app "$(read_port)"; then open_app "http://127.0.0.1:$(read_port)"; exit 0; fi
     owner="$(cat "$OWNER" 2>/dev/null || echo)"
-    if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
-      rm -f "$OWNER" 2>/dev/null || true   # holder is dead — reclaim
-      rmdir "$LOCK" 2>/dev/null || true
-      continue
+    if [ -z "$owner" ]; then
+      # No owner recorded. Normal for a few ms between mkdir and the PID write; if it
+      # persists (holder was SIGKILLed in that window) reclaim after a short grace.
+      ownerless=$((ownerless + 1))
+      [ "$ownerless" -ge 10 ] && { rm -rf "$LOCK" 2>/dev/null || true; ownerless=0; }
+    elif ! kill -0 "$owner" 2>/dev/null; then
+      rm -rf "$LOCK" 2>/dev/null || true   # holder is dead — reclaim
+      ownerless=0
+    else
+      ownerless=0                          # holder alive — keep waiting
     fi
     sleep 0.3
   done
