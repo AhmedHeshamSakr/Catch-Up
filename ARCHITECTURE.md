@@ -8,57 +8,45 @@ Cloud** by configuration, not a rewrite.
 
 ---
 
-## High-level layers
+## System at a glance
+
+Each layer talks to the next through a narrow interface, so any one can change without
+breaking the others — swap **SQLite → Firestore**, **AI Studio → Vertex AI**, or
+**APScheduler → Cloud Scheduler** by config alone.
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Inter, system-ui, sans-serif','fontSize':'14px','lineColor':'#94a3b8','primaryTextColor':'#0f172a'}}}%%
 flowchart TB
-    subgraph L1["🖥️  Client"]
-        A1["Next.js console — Dashboard · News · Digests · Sources · Watchlist · Settings"]
-        A2["Desktop app — Catch-Up.app · PWA · single-port launcher"]
-    end
-    subgraph L2["⚡  API — FastAPI"]
-        B1["Product REST API · /api/*"]
-        B2["ADK deploy surface — Agent Engine / Cloud Run"]
-    end
-    subgraph L3["🧠  Orchestration — Google ADK"]
-        C1["ADK Runner + run_digest()"]
-        C2["NewsCatchUpPipeline — SequentialAgent"]
-        C3["Scheduler — APScheduler → Cloud Scheduler"]
-    end
-    subgraph L4["🔧  Services & domain"]
-        D1["Collectors — RSS · Scrape · GNews · Search · YouTube"]
-        D2["Enrichment — Processing · Critic · Judge · DigestEditor"]
-        D3["Render — Excel · HTML · Markdown"]
-    end
-    subgraph L5["☁️  Models & storage"]
-        E1["Gemini — AI Studio → Vertex AI"]
-        E2["Storage port — SQLite → Firestore"]
-        E3["ADK sessions — DatabaseSessionService"]
-    end
+    L1["🖥️&nbsp;&nbsp;CLIENT<br/><br/>Next.js console&nbsp;·&nbsp;Desktop app (Catch-Up.app · PWA · launcher)"]
+    L2["⚡&nbsp;&nbsp;API&nbsp;·&nbsp;FastAPI<br/><br/>Product REST API /api/*&nbsp;·&nbsp;ADK deploy surface"]
+    L3["🧠&nbsp;&nbsp;ORCHESTRATION&nbsp;·&nbsp;Google ADK<br/><br/>Runner + run_digest()&nbsp;·&nbsp;NewsCatchUpPipeline&nbsp;·&nbsp;Scheduler"]
+    L4["🔧&nbsp;&nbsp;SERVICES &amp; DOMAIN<br/><br/>Collectors&nbsp;·&nbsp;Enrichment (LLM)&nbsp;·&nbsp;Render&nbsp;·&nbsp;SSRF / rate guards"]
+    G{{"Gemini<br/>AI Studio → Vertex AI"}}
+    DB[("Storage<br/>SQLite → Firestore")]
+    SS[("ADK sessions<br/>SQLite")]
 
-    A2 --> A1
-    A1 --> B1
-    B1 --> C1
-    B2 --> C1
-    C3 --> C1
-    C1 --> C2
-    C2 --> D1
-    C2 --> D2
-    C2 --> D3
-    D2 --> E1
-    D1 --> E2
-    D3 --> E2
-    C1 --> E3
+    L1 -->|HTTP /api| L2
+    L2 -->|build &amp; run| L3
+    L3 -->|execute stages| L4
+    L4 -->|LLM| G
+    L4 -->|persist| DB
+    L3 -.->|state| SS
 
-    classDef llm fill:#d1fae5,stroke:#059669,color:#064e3b;
-    classDef store fill:#e0e7ff,stroke:#4f46e5,color:#312e81;
-    class D2,E1 llm;
-    class E2,E3 store;
+    classDef client fill:#eff6ff,stroke:#3b82f6,stroke-width:1.5px,color:#1e3a8a;
+    classDef api fill:#f5f3ff,stroke:#8b5cf6,stroke-width:1.5px,color:#5b21b6;
+    classDef orch fill:#ecfdf5,stroke:#10b981,stroke-width:1.5px,color:#065f46;
+    classDef svc fill:#fffbeb,stroke:#f59e0b,stroke-width:1.5px,color:#92400e;
+    classDef model fill:#f0fdfa,stroke:#0d9488,stroke-width:1.5px,color:#115e59;
+    classDef store fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#3730a3;
+    class L1 client;
+    class L2 api;
+    class L3 orch;
+    class L4 svc;
+    class G model;
+    class DB,SS store;
 ```
 
-Each layer talks to the next through a narrow interface, so any one can change
-without breaking the others: swap **SQLite → Firestore**, **AI Studio → Vertex AI**,
-or **APScheduler → Cloud Scheduler** by config alone.
+<sub>**Shapes** — ▭ layer · ⬡ external model · ⛁ datastore &nbsp;·&nbsp; **Edges** — solid = data flow · dashed = session state. Each layer talks to the next through a narrow interface.</sub>
 
 ---
 
@@ -69,30 +57,46 @@ A run is triggered by the **console** (`POST /api/runs`), the **scheduler**, or 
 every stage reads and writes shared run state via `EventActions.state_delta`.
 
 ```mermaid
-flowchart LR
-    S["run_digest()<br/>ADK Runner"] --> P1["1 · PipelineInit<br/>create DigestRun"]
-    P1 --> CS
-    subgraph CS["2 · CollectSources — ParallelAgent (concurrent)"]
-        direction TB
-        R["CollectRss"]
-        SC["CollectScrape"]
-        AP["CollectApi · GNews"]
-        SE["CollectSearch · Google grounding"]
-        YT["CollectYoutube"]
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Inter, system-ui, sans-serif','fontSize':'13px','lineColor':'#94a3b8'}}}%%
+flowchart TB
+    START(["▶&nbsp; run_digest()<br/>ADK Runner"])
+    P1(["1 · PipelineInit<br/>create DigestRun"])
+    subgraph CS["2 · CollectSources — ParallelAgent · concurrent"]
+        direction LR
+        C_RSS(["CollectRss"])
+        C_SCRAPE(["CollectScrape"])
+        C_API(["CollectApi · GNews"])
+        C_SEARCH(["CollectSearch · grounding"])
+        C_YT(["CollectYoutube"])
     end
-    CS --> P3["3 · NormalizeDedup<br/>merge · normalize · dedup"]
-    P3 --> P4["4 · Processing 🤖<br/>category · importance · EN/AR summary · entities"]
-    P4 --> P5["5 · GuardrailCritic 🤖<br/>faithfulness check · flag/redact · reflection"]
-    P5 --> P6["6 · DigestEditor 🤖<br/>narrative — what matters most"]
-    P6 --> P7["7 · Render<br/>xlsx · HTML · Markdown · finalize"]
+    P3(["3 · NormalizeDedup<br/>merge · normalize · dedup"])
+    P4(["4 · Processing<br/>category · importance · EN/AR · entities"])
+    P5(["5 · GuardrailCritic<br/>faithfulness · flag/redact · reflection"])
+    P6(["6 · DigestEditor<br/>narrative — what matters most"])
+    P7(["7 · Render<br/>xlsx · HTML · Markdown · finalize"])
 
-    classDef llm fill:#d1fae5,stroke:#059669,color:#064e3b;
+    START --> P1
+    P1 --> C_RSS & C_SCRAPE & C_API & C_SEARCH & C_YT
+    C_RSS & C_SCRAPE & C_API & C_SEARCH & C_YT --> P3
+    P3 --> P4 --> P5 --> P6 --> P7
+
+    classDef entry fill:#0f172a,stroke:#0f172a,color:#ffffff,stroke-width:1px;
+    classDef stage fill:#ffffff,stroke:#64748b,stroke-width:1.5px,color:#0f172a;
+    classDef coll fill:#eff6ff,stroke:#3b82f6,stroke-width:1.2px,color:#1e3a8a;
+    classDef llm fill:#ecfdf5,stroke:#10b981,stroke-width:2px,color:#065f46;
+    class START entry;
+    class P1,P3,P7 stage;
+    class C_RSS,C_SCRAPE,C_API,C_SEARCH,C_YT coll;
     class P4,P5,P6 llm;
+
+    style CS fill:#f8fafc,stroke:#cbd5e1,color:#334155
 ```
+
+<sub>🟩 **green = LLM-backed** (Gemini) &nbsp;·&nbsp; ⚪ white = deterministic stage &nbsp;·&nbsp; 🔵 blue = concurrent collector</sub>
 
 > **At a glance:** one root `SequentialAgent` runs **7 stages** in order. Stage 2 is a
 > `ParallelAgent` that fans out to **up to 5 source collectors** concurrently. **3 stages
-> are LLM-backed** (Gemini) — marked 🤖.
+> are LLM-backed** (Gemini).
 
 ---
 
@@ -104,9 +108,9 @@ flowchart LR
 | 2 | **CollectSources** | `ParallelAgent` | Fans out one collector per enabled source type, run concurrently. |
 | ↳ | **SourceCollector ×N** | `BaseAgent` | Collects raw items from **one** source type (RSS · Scrape · GNews · Search · YouTube) into its own state key. |
 | 3 | **NormalizeDedup** | `BaseAgent` | Merges all collected items, normalizes them, removes duplicates. |
-| 4 | **Processing** 🤖 | `BaseAgent` (LLM) | Gemini enrichment: category, importance score, EN + AR summaries, entities, watchlist boosts. |
-| 5 | **GuardrailCritic** 🤖 | `BaseAgent` (LLM) | Faithfulness fact-check of high-importance / watchlisted items; flags + redacts unfaithful summaries; bounded re-summarize (reflection). |
-| 6 | **DigestEditor** 🤖 | `BaseAgent` (LLM) | Generates the narrative "what matters most" digest summary. |
+| 4 | **Processing** 🟩 | `BaseAgent` (LLM) | Gemini enrichment: category, importance score, EN + AR summaries, entities, watchlist boosts. |
+| 5 | **GuardrailCritic** 🟩 | `BaseAgent` (LLM) | Faithfulness fact-check of high-importance / watchlisted items; flags + redacts unfaithful summaries; bounded re-summarize (reflection). |
+| 6 | **DigestEditor** 🟩 | `BaseAgent` (LLM) | Generates the narrative "what matters most" digest summary. |
 | 7 | **Render** | `BaseAgent` | Writes Excel / HTML / Markdown outputs and finalizes the run. |
 
 ---
