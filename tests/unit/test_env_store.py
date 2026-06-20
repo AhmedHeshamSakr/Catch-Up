@@ -42,6 +42,18 @@ def test_value_with_hash_and_spaces_roundtrips_through_settings(tmp_path, monkey
     assert Settings(_env_file=str(p)).google_api_key == "hello world#x"
 
 
+def test_upsert_dedups_existing_duplicate_keys(tmp_path, monkeypatch):
+    # Two pre-existing lines for the same key: after update there must be exactly one,
+    # carrying the new value (dotenv is last-wins; a stale 2nd line would shadow us).
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    p = tmp_path / ".env"
+    p.write_text("GOOGLE_API_KEY=old1\nKEEP=x\nGOOGLE_API_KEY=old2\n", encoding="utf-8")
+    upsert_env(p, {"GOOGLE_API_KEY": "new"})
+    lines = p.read_text(encoding="utf-8").splitlines()
+    assert sum(1 for ln in lines if ln.startswith("GOOGLE_API_KEY=")) == 1
+    assert Settings(_env_file=str(p)).google_api_key == "new"
+
+
 def test_upsert_sets_0600_permissions(tmp_path):
     p = tmp_path / ".env"
     upsert_env(p, {"A": "1"})

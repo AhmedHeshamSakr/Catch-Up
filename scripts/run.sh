@@ -27,12 +27,17 @@ note() {  # best-effort macOS notification + stdout
     osascript -e "display notification \"$1\" with title \"Catch-Up\"" >/dev/null 2>&1 || true
 }
 
-read_port() {
-  local p=""
+read_port() {  # dotenv-ish: honors 'export', strips inline comments, validates range
+  local line val p=""
   if [ -f app/.env ]; then
-    p="$(grep -E '^[[:space:]]*APP_PORT=' app/.env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"' \t" || true)"
+    line="$(grep -E '^[[:space:]]*(export[[:space:]]+)?APP_PORT=' app/.env 2>/dev/null | tail -1 || true)"
+    val="${line#*=}"     # value after the first '='
+    val="${val%%#*}"     # drop any inline comment
+    val="$(printf '%s' "$val" | tr -d "\"' \t")"
+    p="$val"
   fi
   case "$p" in (''|*[!0-9]*) p=8000 ;; esac
+  if [ "$p" -lt 1024 ] 2>/dev/null || [ "$p" -gt 65535 ] 2>/dev/null; then p=8000; fi
   echo "$p"
 }
 
@@ -75,15 +80,36 @@ if is_our_app "$PORT"; then
   exit 0
 fi
 
+# Serialize concurrent cold starts (Codex #5): only one launch picks a port and
+# starts a server at a time. A waiting launch opens the winner's server as soon as
+# it's healthy, so two double-clicks never start two servers.
+LOCK="$RUN_DIR/launch.lock"
+acquired=0
+for _ in $(seq 1 200); do
+  if mkdir "$LOCK" 2>/dev/null; then acquired=1; break; fi
+  if is_our_app "$(read_port)"; then open_app "http://127.0.0.1:$(read_port)"; exit 0; fi
+  sleep 0.3
+done
+if [ "$acquired" -eq 0 ]; then  # stale lock — take it over
+  rmdir "$LOCK" 2>/dev/null || true
+  mkdir "$LOCK" 2>/dev/null || true
+fi
+trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT INT TERM
+
+# Re-check under the lock (the winner may have just brought it up).
+PORT="$(read_port)"
+if is_our_app "$PORT"; then open_app "http://127.0.0.1:$PORT"; exit 0; fi
+
 PORT="$(pick_port "$PORT")"
 if is_our_app "$PORT"; then open_app "http://127.0.0.1:$PORT"; exit 0; fi
 
 command -v uv >/dev/null 2>&1 || { echo "uv not found — install from https://docs.astral.sh/uv/"; exit 1; }
 
-# First run: build the console (same-origin base) if it isn't there yet.
-if [ ! -d frontend/out ]; then
+# Build the console if missing OR if a stale build baked a non-same-origin API
+# base (e.g. a dev `npm run build` with .env.local) — single-port needs same-origin.
+if [ ! -d frontend/out ] || grep -rqs "localhost:8000" frontend/out 2>/dev/null; then
   command -v npm >/dev/null 2>&1 || { echo "npm not found — install Node 20+ to build the console."; exit 1; }
-  note "First run: building the console (~1-2 min)…"
+  note "Building the console (~1-2 min)…"
   ( cd frontend && npm ci && NEXT_PUBLIC_API_BASE="" npm run build )
 fi
 

@@ -13,6 +13,7 @@ beforeEach(() => {
     app_host: "127.0.0.1",
     app_port: 8000,
     gemini_key_set: true,
+    shadowed_keys: [],
   });
   vi.spyOn(api, "putSettings").mockResolvedValue({
     applied: ["google_api_key"],
@@ -57,6 +58,17 @@ describe("SettingsPage", () => {
         expect.objectContaining({ app_port: 9000 })
       )
     );
+  });
+
+  it("warns when a root .env shadows app/.env", async () => {
+    vi.spyOn(api, "getSettings").mockResolvedValue({
+      app_host: "127.0.0.1",
+      app_port: 8000,
+      gemini_key_set: true,
+      shadowed_keys: ["GOOGLE_API_KEY"],
+    });
+    render(<SettingsPage />);
+    expect(await screen.findByText(/overriding/i)).toBeInTheDocument();
   });
 
   it("does not resend an unchanged port or empty key", async () => {

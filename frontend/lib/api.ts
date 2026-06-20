@@ -40,7 +40,12 @@ async function request<T>(
   init?: RequestInit,
   schema?: ZodType<T>
 ): Promise<T> {
-  const base = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+  // Production/static-export build is same-origin (one FastAPI process serves the
+  // console + /api on one port). Dev (`next dev`) defaults to the two-port backend.
+  // An explicit NEXT_PUBLIC_API_BASE (incl. "") always wins (?? only fills undefined).
+  const base =
+    process.env.NEXT_PUBLIC_API_BASE ??
+    (process.env.NODE_ENV === "production" ? "" : "http://localhost:8000");
   // Optional shared API key. Sent only when configured; exposed to the browser
   // (NEXT_PUBLIC_*), so use only for trusted/internal deploys — real per-user
   // auth is a separate milestone. Must match the backend's API_KEY.
@@ -149,7 +154,12 @@ export const api = {
     });
   },
 
-  getSettings(): Promise<{ app_host: string; app_port: number; gemini_key_set: boolean }> {
+  getSettings(): Promise<{
+    app_host: string;
+    app_port: number;
+    gemini_key_set: boolean;
+    shadowed_keys: string[];
+  }> {
     return request("/api/settings");
   },
 

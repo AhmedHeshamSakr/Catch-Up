@@ -23,7 +23,13 @@ _NEEDS_QUOTING = set(" \t\"'#=$`\\\n\r")
 
 
 def _format_value(value: str) -> str:
-    """Render a value for a dotenv line, double-quoting + escaping when needed."""
+    """Render a value for a dotenv line, double-quoting + escaping when needed.
+
+    NOTE: python-dotenv (the reader pydantic-settings uses) performs ``${VAR}``
+    interpolation on load regardless of quote style, so values containing ``$``
+    cannot be stored verbatim — callers reject such values upstream (see
+    ``PUT /api/settings``). Everything else round-trips through these double quotes.
+    """
     if value != "" and not any(c in _NEEDS_QUOTING for c in value):
         return value
     escaped = (
@@ -55,17 +61,23 @@ def upsert_env(path: str | Path, updates: dict[str, str]) -> None:
     path = Path(path)
     with _LOCK:
         existing = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
-        remaining = dict(updates)
+        keys = set(updates)
+        written: set[str] = set()
         out: list[str] = []
         for line in existing:
             parsed = _line_key(line.strip())
-            if parsed is not None and parsed[1] in remaining:
-                prefix, bare = parsed
-                out.append(f"{prefix}{bare}={_format_value(remaining.pop(bare))}")
+            if parsed is not None and parsed[1] in keys:
+                _, bare = parsed
+                if bare in written:
+                    continue  # drop later duplicates so dotenv (last-wins) reads OUR value
+                prefix = parsed[0]
+                out.append(f"{prefix}{bare}={_format_value(updates[bare])}")
+                written.add(bare)
             else:
                 out.append(line)
-        for key, value in remaining.items():
-            out.append(f"{key}={_format_value(value)}")
+        for key, value in updates.items():
+            if key not in written:
+                out.append(f"{key}={_format_value(value)}")
         data = "\n".join(out) + ("\n" if out else "")
 
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,6 +89,15 @@ def upsert_env(path: str | Path, updates: dict[str, str]) -> None:
                 os.fsync(f.fileno())
             os.chmod(tmp, 0o600)
             os.replace(tmp, path)
+            # Durability: fsync the directory so the rename survives power loss.
+            try:
+                dir_fd = os.open(str(path.parent), os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except OSError:
+                pass
         finally:
             if os.path.exists(tmp):
                 os.unlink(tmp)

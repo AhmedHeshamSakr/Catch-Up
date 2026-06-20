@@ -96,6 +96,35 @@ def test_put_invalid_port_rejected(tmp_path):
     assert c.put("/api/settings", json={"app_port": 70000}).status_code == 422
 
 
+def test_put_rejects_dollar_in_key(tmp_path):
+    # python-dotenv would interpolate ${VAR}/$VAR on next launch — reject (Codex #3).
+    c = _client(_make(tmp_path))
+    assert c.put("/api/settings", json={"google_api_key": "ab${HOME}cd"}).status_code == 422
+    assert c.put("/api/settings", json={"google_api_key": "ab$cd"}).status_code == 422
+
+
+def test_get_settings_reports_shadowed_keys_field(tmp_path):
+    body = _client(_make(tmp_path)).get("/api/settings").json()
+    assert "shadowed_keys" in body and isinstance(body["shadowed_keys"], list)
+
+
+def test_put_write_failure_leaves_live_state_unchanged(tmp_path, monkeypatch):
+    # Persist-first (Codex #6): a write failure must not mutate os.environ/settings.
+    import os
+
+    monkeypatch.setenv("GOOGLE_API_KEY", "orig")
+    settings = _make(tmp_path, google_api_key="orig")
+    (tmp_path / "blocker").write_text("x", encoding="utf-8")  # parent-as-file -> write fails
+    settings.env_path = str(tmp_path / "blocker" / ".env")
+    app = create_app(settings, run_digest_fn=lambda **kw: None)
+    c = TestClient(app, base_url="http://127.0.0.1:8000", client=("127.0.0.1", 1), raise_server_exceptions=False)
+
+    r = c.put("/api/settings", json={"google_api_key": "newkey"})
+    assert r.status_code == 500
+    assert settings.google_api_key == "orig"        # live state untouched
+    assert os.environ["GOOGLE_API_KEY"] == "orig"
+
+
 # --- localhost write guard (Codex #6) --------------------------------------
 
 def test_put_rejects_remote_client(tmp_path):

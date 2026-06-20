@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, KeyRound } from "lucide-react";
+import { CheckCircle2, KeyRound, AlertTriangle } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,6 +17,7 @@ export default function SettingsPage() {
   const [keyInput, setKeyInput] = useState("");
   const [port, setPort] = useState("");
   const [loadedPort, setLoadedPort] = useState<number | null>(null);
+  const [shadowed, setShadowed] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -28,6 +29,7 @@ export default function SettingsPage() {
         setKeySet(s.gemini_key_set);
         setLoadedPort(s.app_port);
         setPort(String(s.app_port));
+        setShadowed(s.shadowed_keys ?? []);
         setLoaded(true);
       })
       .catch(() => {
@@ -81,6 +83,18 @@ export default function SettingsPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="Settings" subtitle="Local configuration for this machine" />
+
+      {loaded && shadowed.length > 0 && (
+        <div className="flex max-w-xl items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800/40 dark:bg-amber-950/20 dark:text-amber-300">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          <span>
+            A root <code>.env</code> is overriding <code>app/.env</code> for{" "}
+            <strong>{shadowed.join(", ")}</strong>. Saves here won&apos;t take effect on the
+            next launch until you remove {shadowed.length > 1 ? "those keys" : "that key"} from
+            the root <code>.env</code>.
+          </span>
+        </div>
+      )}
 
       {!loaded ? (
         <Skeleton className="h-48 rounded-xl w-full max-w-xl" />

@@ -5,8 +5,10 @@ import { cn } from "@/lib/utils";
 
 type Status = "online" | "offline" | "checking";
 
+// Same-origin in production (single-port desktop build); two-port backend in dev.
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+  process.env.NEXT_PUBLIC_API_BASE ??
+  (process.env.NODE_ENV === "production" ? "" : "http://localhost:8000");
 
 export function HealthPill() {
   const [status, setStatus] = useState<Status>("checking");

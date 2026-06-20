@@ -170,31 +170,47 @@ def register_product_routes(
     @api.get("/settings", dependencies=[require_local])
     def get_settings() -> dict[str, object]:
         # Non-secret only: the key value is NEVER returned, just whether one is set.
+        # shadowed_keys warns the UI when a root .env overrides app/.env so a save
+        # isn't silently ignored on next launch (Codex #8).
         return {
             "app_host": settings.app_host,
             "app_port": settings.app_port,
             "gemini_key_set": bool(settings.google_api_key),
+            "shadowed_keys": detect_env_shadow(REPO_ROOT),
         }
 
     @api.put("/settings", dependencies=[require_local])
     def put_settings(body: SettingsPatch) -> dict[str, list[str]]:
+        # python-dotenv interpolates ${VAR}/$VAR on load regardless of quoting, so a
+        # '$' in the stored key would corrupt it on the next launch — reject it.
+        if body.google_api_key is not None and "$" in body.google_api_key:
+            raise HTTPException(status_code=422, detail="key must not contain '$'")
+
         applied: list[str] = []
         restart_required: list[str] = []
         updates: dict[str, str] = {}
+        if body.google_api_key is not None:
+            updates["GOOGLE_API_KEY"] = body.google_api_key
+            applied.append("google_api_key")
+        if body.app_port is not None:
+            updates["APP_PORT"] = str(body.app_port)
+            restart_required.append("app_port")
+
+        # Persist FIRST: if the write fails we must NOT have changed live state
+        # (Codex #6) — the request 500s with the process untouched.
+        if updates:
+            upsert_env(settings.env_path, updates)
+
+        # Now apply to the live process.
         if body.google_api_key is not None:
             # Overwrite os.environ directly (configure_genai only sets-if-absent,
             # Codex #7); applies to the NEXT run / next genai client, not mid-run.
             settings.google_api_key = body.google_api_key
             os.environ["GOOGLE_API_KEY"] = body.google_api_key
             configure_genai(settings)
-            updates["GOOGLE_API_KEY"] = body.google_api_key
-            applied.append("google_api_key")
         if body.app_port is not None:
             settings.app_port = body.app_port
-            updates["APP_PORT"] = str(body.app_port)
-            restart_required.append("app_port")
-        if updates:
-            upsert_env(settings.env_path, updates)
+
         return {"applied": applied, "restart_required": restart_required}
 
     @api.get("/dashboard", response_model=DashboardOut, dependencies=[require_api_key])
