@@ -1,0 +1,24 @@
+Catch-Up — News Intelligence Agent
+Copyright 2026 Ahmed Hesham
+
+Licensed under the Apache License, Version 2.0 (see the LICENSE file).
+
+------------------------------------------------------------------------
+Third-party notices
+------------------------------------------------------------------------
+
+This product includes software generated from the google-agents-cli
+scaffold, Copyright Google LLC, licensed under the Apache License,
+Version 2.0. The original Google LLC copyright headers are retained in
+the affected files, including:
+
+  - Dockerfile
+  - app/__init__.py
+  - app/agent.py
+  - app/fast_api_app.py
+  - app/app_utils/telemetry.py
+  - app/app_utils/typing.py
+
+Except where a file's own header states otherwise, all other files in
+this repository are Copyright 2026 Ahmed Hesham and are licensed under
+the Apache License, Version 2.0.

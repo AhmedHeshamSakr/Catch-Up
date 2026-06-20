@@ -43,7 +43,7 @@ from app.services.watchlist import Watchlist, load_watchlist
 logger = logging.getLogger(__name__)
 
 # Identity returned by /api/health so the desktop launcher can tell "our app is
-# already on this port" (reuse) apart from an unrelated local service (Codex #9).
+# already on this port" (reuse) apart from an unrelated local service.
 APP_MARKER = "catch-up"
 try:
     APP_VERSION = importlib.metadata.version("catch-up")
@@ -171,7 +171,7 @@ def register_product_routes(
     def get_settings() -> dict[str, object]:
         # Non-secret only: the key value is NEVER returned, just whether one is set.
         # shadowed_keys warns the UI when a root .env overrides app/.env so a save
-        # isn't silently ignored on next launch (Codex #8).
+        # isn't silently ignored on next launch.
         return {
             "app_host": settings.app_host,
             "app_port": settings.app_port,
@@ -196,15 +196,15 @@ def register_product_routes(
             updates["APP_PORT"] = str(body.app_port)
             restart_required.append("app_port")
 
-        # Persist FIRST: if the write fails we must NOT have changed live state
-        # (Codex #6) — the request 500s with the process untouched.
+        # Persist FIRST: if the write fails we must NOT have changed live state —
+        # the request 500s with the process untouched.
         if updates:
             upsert_env(settings.env_path, updates)
 
         # Now apply to the live process.
         if body.google_api_key is not None:
-            # Overwrite os.environ directly (configure_genai only sets-if-absent,
-            # Codex #7); applies to the NEXT run / next genai client, not mid-run.
+            # Overwrite os.environ directly (configure_genai only sets-if-absent);
+            # applies to the NEXT run / next genai client, not mid-run.
             settings.google_api_key = body.google_api_key
             os.environ["GOOGLE_API_KEY"] = body.google_api_key
             configure_genai(settings)

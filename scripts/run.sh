@@ -41,7 +41,7 @@ read_port() {  # dotenv-ish: honors 'export', strips inline comments, validates 
   echo "$p"
 }
 
-is_our_app() {  # $1 = port ; true only if OUR app answers (marker, Codex #9)
+is_our_app() {  # $1 = port ; true only if OUR app answers (marker)
   curl -fsS --max-time 1 "http://127.0.0.1:$1/api/health" 2>/dev/null \
     | grep -q '"app"[[:space:]]*:[[:space:]]*"catch-up"'
 }
@@ -80,7 +80,7 @@ if is_our_app "$PORT"; then
   exit 0
 fi
 
-# Serialize concurrent cold starts (Codex #5): only one launch picks a port and
+# Serialize concurrent cold starts: only one launch picks a port and
 # starts a server at a time. The lock dir carries the holder's PID; a waiter only
 # steals it if that PID is DEAD (so a long first-run build is never falsely stolen),
 # and opens the winner's server the moment it's healthy. Two double-clicks never

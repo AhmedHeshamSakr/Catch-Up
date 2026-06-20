@@ -29,7 +29,7 @@ def _client(settings, *, client=("127.0.0.1", 12345), base_url="http://127.0.0.1
     return TestClient(app, base_url=base_url, client=client)
 
 
-# --- /api/health marker (Codex #9) -----------------------------------------
+# --- /api/health marker -----------------------------------------
 
 def test_health_includes_app_marker(tmp_path):
     c = _client(_make(tmp_path))
@@ -97,7 +97,7 @@ def test_put_invalid_port_rejected(tmp_path):
 
 
 def test_put_rejects_dollar_in_key(tmp_path):
-    # python-dotenv would interpolate ${VAR}/$VAR on next launch — reject (Codex #3).
+    # python-dotenv would interpolate ${VAR}/$VAR on next launch — reject.
     c = _client(_make(tmp_path))
     assert c.put("/api/settings", json={"google_api_key": "ab${HOME}cd"}).status_code == 422
     assert c.put("/api/settings", json={"google_api_key": "ab$cd"}).status_code == 422
@@ -109,7 +109,7 @@ def test_get_settings_reports_shadowed_keys_field(tmp_path):
 
 
 def test_put_write_failure_leaves_live_state_unchanged(tmp_path, monkeypatch):
-    # Persist-first (Codex #6): a write failure must not mutate os.environ/settings.
+    # Persist-first: a write failure must not mutate os.environ/settings.
     import os
 
     monkeypatch.setenv("GOOGLE_API_KEY", "orig")
@@ -125,7 +125,7 @@ def test_put_write_failure_leaves_live_state_unchanged(tmp_path, monkeypatch):
     assert os.environ["GOOGLE_API_KEY"] == "orig"
 
 
-# --- localhost write guard (Codex #6) --------------------------------------
+# --- localhost write guard --------------------------------------
 
 def test_put_rejects_remote_client(tmp_path):
     c = _client(_make(tmp_path), client=("203.0.113.9", 5000))

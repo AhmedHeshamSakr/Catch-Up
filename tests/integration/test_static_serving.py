@@ -1,5 +1,5 @@
 """Single-port static serving: FastAPI serves the Next.js export (frontend/out)
-with a Next-aware resolver + SPA fallback, without shadowing /api/* (Codex #2)."""
+with a Next-aware resolver + SPA fallback, without shadowing /api/*."""
 
 from fastapi.testclient import TestClient
 
