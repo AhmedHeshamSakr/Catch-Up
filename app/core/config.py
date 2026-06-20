@@ -140,6 +140,10 @@ class Settings(BaseSettings):
     # app/.env that Settings reads on next launch; injectable so tests never touch
     # the real file.
     env_path: str = str(REPO_ROOT / "app" / ".env")
+    # Built Next.js console (static export) served at / in single-port desktop
+    # mode. Mounted by create_app only when this directory exists, so server/CI
+    # runs without a frontend build are unaffected.
+    console_dir: str = str(REPO_ROOT / "frontend" / "out")
     # Token-bucket rate limit for POST /runs and POST /sources/resolve.
     rate_limit_burst: int = 30
     rate_limit_refill_per_sec: float = 1.0

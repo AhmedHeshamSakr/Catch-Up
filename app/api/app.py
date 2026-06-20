@@ -6,6 +6,7 @@ import logging
 import os
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import (
@@ -21,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.api.schemas import DashboardOut, ResolveIn, ResolveOut, RunDetail
+from app.api.static import mount_console
 from app.core.config import REPO_ROOT, Settings, SourceConfig, detect_env_shadow, load_sources
 from app.core.domain import Category, Importance
 from app.core.env_store import upsert_env
@@ -337,4 +339,8 @@ def create_app(
         resolve_channel_id_fn=resolve_channel_id_fn,
         discover_feed_fn=discover_feed_fn,
     )
+    # Single-port desktop mode: serve the built console at / (after /api so API
+    # routes win). Only when the export exists — server/CI runs skip this.
+    if Path(settings.console_dir).is_dir():
+        mount_console(app, settings.console_dir)
     return app
