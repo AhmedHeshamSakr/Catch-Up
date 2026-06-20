@@ -148,4 +148,18 @@ export const api = {
       body: JSON.stringify({ type, url }),
     });
   },
+
+  getSettings(): Promise<{ app_host: string; app_port: number; gemini_key_set: boolean }> {
+    return request("/api/settings");
+  },
+
+  putSettings(patch: {
+    google_api_key?: string;
+    app_port?: number;
+  }): Promise<{ applied: string[]; restart_required: string[] }> {
+    return request("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    });
+  },
 };

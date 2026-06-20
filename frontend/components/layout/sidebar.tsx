@@ -8,6 +8,7 @@ import {
   Newspaper,
   Rss,
   Star,
+  Settings,
   User,
   ChevronsUpDown,
 } from "lucide-react";
@@ -42,6 +43,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Sources", href: "/sources", icon: Rss },
       { label: "Watchlist", href: "/watchlist", icon: Star },
+      { label: "Settings", href: "/settings", icon: Settings },
     ],
   },
 ];
