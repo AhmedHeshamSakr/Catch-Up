@@ -28,19 +28,22 @@ By default the backend listens on `http://localhost:8000`.
 
 ## Environment
 
-Configure the backend URL via `NEXT_PUBLIC_API_BASE`. Copy the example and
-adjust if your backend runs elsewhere:
+`NEXT_PUBLIC_API_BASE` configures the backend URL **for two-port dev** (`next dev`
+on :3000 talking to the backend on :8000). Copy the example for dev:
 
 ```bash
 cp .env.local.example .env.local
 ```
 
 ```env
-# .env.local
+# .env.local — DEV ONLY
 NEXT_PUBLIC_API_BASE=http://localhost:8000
 ```
 
-If unset, the console falls back to `http://localhost:8000`.
+When **unset**, a `next dev` build defaults to `http://localhost:8000`, while a
+**production / static-export build defaults to same-origin** (`""`) — which is how
+the single-port desktop app serves the console and `/api` from one origin. Leave
+`NEXT_PUBLIC_API_BASE` unset for the desktop build (the launcher builds with `""`).
 
 ## Getting started
 

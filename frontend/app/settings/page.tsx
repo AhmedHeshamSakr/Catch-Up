@@ -82,7 +82,9 @@ export default function SettingsPage() {
         e instanceof ApiError && e.status === 403
           ? "Settings can only be changed from this machine."
           : e instanceof ApiError && e.status === 422
-            ? "Port must be between 1024 and 65535."
+            ? patch.google_api_key?.includes("$")
+              ? "The API key can't contain a '$' character."
+              : "Port must be between 1024 and 65535."
             : "Couldn't save settings.";
       toast.error(msg);
     } finally {

@@ -4,7 +4,8 @@
 - **HEAD reviewed:** 0e95ea1 (full `main...HEAD` diff)
 - **Reviewer:** `codex exec --sandbox read-only` (codex-cli 0.140.0)
 - **Date (UTC):** 2026-06-20T11:58:15Z
-- **Verdict:** round 1 = **NOT READY** (2 high, 6 medium). All FIXED; re-review pending.
+- **Verdict:** round 1 = **NOT READY** (2 high, 6 medium) → fixed → 4 more re-review rounds, each surfacing 1–2 medium robustness issues, all fixed → **round 5 = VERDICT: READY** (no remaining blocker/high/medium).
+- **Re-review rounds (all FIXED):** r2 — launch-lock owner-PID steal + proactive shadow detection; r3 — ownerless-lock grace reclaim + `test_deploy_surface` health-marker regression; r4 — `stop.sh` validates PID is our uvicorn before kill; r5 — READY; nits fixed (Settings 422 message distinguishes `$`-in-key vs port; `frontend/README.md` dev-vs-export wording).
 - **Cleared by Codex:** no DNS-rebinding/CSRF bypass in `_require_local_write` for the loopback threat model (security guard validated).
 
 | # | Finding | Conf | Sev | Disposition |
