@@ -1,8 +1,8 @@
 # Local Desktop App — Design Spec
 
 **Date:** 2026-06-20
-**Status:** Approved (pending spec review)
-**Branch:** `feat/scheduler` → new feature branch for implementation
+**Status:** Revised after Codex review (round 1) — pending re-review
+**Branch:** `feat/local-desktop-app`
 
 ## Goal
 
@@ -20,161 +20,194 @@ no per-user auth, no shared cloud URL. The README must say so in bold.
 ## Constraints & honest framing
 
 - The Gemini key is consumed **server-side** (the Python process calls Gemini, not the
-  browser). A UI key field therefore POSTs to a backend endpoint that persists it and
-  reconfigures the client in-process. This is safe **only on localhost** — if the app
-  were ever exposed publicly without auth, anyone could overwrite/abuse the key. The
-  backend binds `127.0.0.1` by default to make that hard, and the README warns against
-  exposing it.
-- You cannot hot-swap the port of the server you are currently using. So **port changes
-  apply on next launch** (the launcher reads the saved port on boot). The **key** can be
-  applied live (in-process) with no restart.
-- `app/.env` is already gitignored and is what `Settings` reads (`env_file=("app/.env", ".env")`).
-  It is the natural single local config store: the Settings page writes to it, the live
-  process is updated, and the launcher reads the port from it on boot.
+  browser). A UI key field therefore PUTs to a backend endpoint that persists it and
+  reconfigures the client in-process. This is safe **only on localhost**.
+- You cannot hot-swap the port of the server you are currently using. **Port changes apply
+  on next launch**; the **key** applies on the **next run / next LLM client** (not mid-run).
+- `app/.env` is the local config store the Settings page writes and the launcher reads.
+  **Precedence caveat (Codex #4):** `Settings` uses `env_file=("app/.env", ".env")`, and
+  pydantic-settings gives the **later** file priority — so a root `.env`, if present, shadows
+  `app/.env`. Mitigation: the desktop config is authoritative in `app/.env`; on startup the
+  app logs a warning if a root `.env` also defines `google_api_key`/`app_port`. (We do not
+  reorder the tuple to avoid changing existing server behavior.)
+- **Import side effects (Codex #5):** importing the `app` package runs `app/__init__.py` →
+  `from .agent import app`, and `app/agent.py` builds the full ADK pipeline + SQLite storage
+  at module import. So nothing on the hot path (e.g. the launcher's port read) may import the
+  `app` package. The launcher parses `app/.env` directly instead.
 
 ## Architecture
 
 ```
 Catch-Up.app (macOS bundle, custom icon)
   └─ scripts/run.sh
-       reads port from Settings (default 8000)
-       probes port → start | reuse | next-free
+       reads port by parsing app/.env directly (NO python import) — default 8000
+       probes port → start | reuse-if-our-app | next-free-if-busy
        (first run) builds frontend/out if missing
        uvicorn 127.0.0.1:<port>  ← ONE process
-         ├─ /            → serves frontend/out (static export) + SPA fallback
-         └─ /api/*       → product REST API (existing) + new /api/settings
-       waits /api/health → opens browser
+         ├─ /api/*       → product REST API (existing) + new /api/settings
+         └─ /  (catch-all, registered LAST)  → Next-aware static resolver over frontend/out
+       waits /api/health (validates app marker) → opens browser
 ```
 
 ### 1. Single-port serving
 
 - Add `output: 'export'` to `frontend/next.config.ts`. `next build` emits `frontend/out/`.
-- In `app/api/app.py` `create_app()` (the `catchup serve` surface), after registering
-  `/api/*` routes, mount the static export at `/` with a **SPA fallback**: any GET that
-  isn't `/api/*` and doesn't map to a real exported file returns the app shell so
-  client-side routing handles it.
-- Backend binds **`127.0.0.1`** by default (config: `host: str = "127.0.0.1"`).
+- **Desktop/static build uses same-origin URLs (Codex #3).** Build with
+  `NEXT_PUBLIC_API_BASE=""` so `lib/api.ts` and `health-pill.tsx` issue **relative** requests
+  (`/api/...`) against whatever origin/port served the page. Fix `health-pill.tsx` (and any
+  other hardcoded default) to honor the empty base. `NEXT_PUBLIC_API_BASE` stays meaningful
+  only for dev / two-port mode.
+- **Next-aware static serving (Codex #2).** A plain `StaticFiles(html=True)` mount is wrong:
+  with default `trailingSlash:false`, export emits `digests.html`, not `digests/index.html`.
+  Implement a small catch-all (registered **after** `/api/*`) that resolves in order:
+  1. exact file in `frontend/out`
+  2. `<path>.html`
+  3. `<path>/index.html`
+  4. SPA fallback → `frontend/out/index.html`
+  Never serve the fallback for `/api/*` (those 404 normally). Guard against path traversal
+  (resolve and confirm the target stays inside `frontend/out`).
 
-**The one real obstacle — `digests/[runId]`.** A runtime run ID can't be pre-rendered at
-build time. Resolution, in order of preference:
-1. Make `app/digests/[runId]/page.tsx` a **client component** that reads `runId` via
-   `useParams()` and fetches via SWR; serve it through the FastAPI SPA fallback.
-2. If static export still rejects the dynamic segment, refactor the route to a query
-   param: `/digests?run=<id>` (no dynamic segment → export is trivially clean).
-3. Last resort: keep **two-port** mode (FastAPI + `next start`) behind the same launcher.
+**The dynamic-route blocker — RESOLVED (Codex #1).** `digests/[runId]` cannot be statically
+exported (a runtime run id has no `generateStaticParams`, and `"use client"` does not change
+that). **Primary design: replace it with `/digests?run=<id>`** — a single static `digests`
+page that reads the `run` query param client-side and fetches via SWR. This removes the only
+dynamic segment, so `output:'export'` is clean. Update all links that point to
+`/digests/<id>` to `/digests?run=<id>` and move the page logic from `[runId]/page.tsx` to the
+`digests` page. (No `generateStaticParams` gymnastics; the query-param route is the design,
+not a fallback.)
 
-The implementation plan will try (1), fall back to (2), and only use (3) if both fail.
+Backend binds **`127.0.0.1`** by default (`Settings.app_host = "127.0.0.1"`).
 
-### 2. New backend routes (under `/api`, localhost-only)
+### 2. New backend routes (under `/api`)
 
-A small `_require_localhost` dependency rejects non-loopback clients (`request.client.host`
-not in `{127.0.0.1, ::1}`) → 403. Applied to the settings routes only (`/api/health`
-stays public; the rest keep their existing `_require_api_key`).
+**Settings security (Codex #6).** The settings routes write secrets to disk, so loopback bind
+alone is insufficient (DNS-rebinding can hit `127.0.0.1` with an attacker-controlled `Host`).
+Defense in depth on the **settings write** path:
+- `TrustedHostMiddleware` (or an equivalent dependency) allowing only `localhost`,
+  `127.0.0.1`, `[::1]` Host headers.
+- A `_require_local_write` dependency on `PUT /api/settings` that additionally (a) confirms
+  `request.client.host` is loopback and (b) rejects the request unless `Origin`/`Referer`,
+  when present, is same-origin/loopback. 403 otherwise.
+- `/api/health` stays public; existing `/api/*` keep their current `_require_api_key`.
 
+Routes:
 - `GET /api/settings` → **non-secret** state only:
-  `{ "app_port": 8000, "gemini_key_set": true, "host": "127.0.0.1" }`.
-  Never returns the key value.
+  `{ "app_port": 8000, "app_host": "127.0.0.1", "gemini_key_set": true }`. Never the key value.
 - `PUT /api/settings` → body `{ "google_api_key"?: str, "app_port"?: int }`.
-  - Writes provided fields to `app/.env` (upsert KEY=VALUE, preserving other lines).
-  - Updates the live `Settings` instance.
-  - If `google_api_key` given: set `os.environ["GOOGLE_API_KEY"]` (overwrite) and call
-    `configure_genai(settings)` so the next run uses it **without restart**.
-  - Validate `app_port` is an int in `1024–65535`.
-  - Response: `{ "applied": ["google_api_key"], "restart_required": ["app_port"] }`
-    so the UI can tell the user what takes effect when.
+  - Validate `app_port` ∈ `1024–65535`.
+  - Persist via the atomic env writer (below).
+  - Update the live `Settings` instance.
+  - If `google_api_key` given: set `os.environ["GOOGLE_API_KEY"]` **directly (overwrite)** and
+    call `configure_genai(settings)`. **Semantics (Codex #7):** `configure_genai` only sets the
+    env var when unset, so the endpoint must overwrite `os.environ` itself; the change takes
+    effect on the **next run / next genai client construction**, not mid-run. Response field
+    names this honestly.
+  - Response: `{ "applied": ["google_api_key"], "restart_required": ["app_port"] }`.
 
-> Note: `configure_genai` currently only sets `GOOGLE_API_KEY` when it's unset. The
-> settings endpoint must **overwrite** (set `os.environ` directly) so a changed key takes
-> effect. Verify the genai client reads the env per-call (it constructs per `run_digest`);
-> if it caches at import, document the restart caveat instead of claiming live apply.
+**Atomic env writer (Codex #8)** — `app/core/env_store.py` (or similar):
+- Upsert `KEY=VALUE` lines, preserving all other lines/comments.
+- dotenv-safe quoting/escaping of values (handle `#`, spaces, quotes, `=`, newlines).
+- Write to a temp file in the same dir, `os.replace` for atomicity, `chmod 0600`.
+- Process-level lock to serialize concurrent writes.
+- Unit tests: values containing `#`, quotes, spaces; concurrent writes; crash leaves the
+  original intact (temp-file pattern).
 
 ### 3. Settings page (`frontend/app/settings/page.tsx`)
 
 - Client component. On load, `GET /api/settings`.
-- Fields: **Gemini API key** (`type=password`, helper "applies immediately"), **Port**
+- Fields: **Gemini API key** (`type=password`, helper "applies on next run"), **Port**
   (number, helper "restart to apply"). Shows "✓ key configured" when `gemini_key_set`.
-- Save → `PUT /api/settings`; toast (sonner is already a dep) reflects the
-  `applied` / `restart_required` response.
-- Add a nav link to Settings in the existing layout.
+- Save → `PUT /api/settings`; sonner toast reflects `applied` / `restart_required`.
+- Add a Settings nav link in the existing layout.
 
 ### 4. Launcher — `scripts/run.sh` + `Catch-Up.app`
 
-`scripts/run.sh` (the real logic; the `.app` just calls it):
-1. Resolve repo root; ensure deps (`uv` present; `agents-cli install` / `uv sync` as needed).
-2. Read port: `uv run python -c "from app.core.config import Settings; print(Settings().app_port)"`
-   (default 8000).
-3. Probe port:
-   - `curl -s 127.0.0.1:<port>/api/health` OK → **already running**, `open` browser, exit 0.
-   - Port bound by something else → scan upward for the next free port, use it, print a notice.
+`scripts/run.sh`:
+1. Resolve repo root; ensure `uv` present (and `node`/`npm` for the first-run build).
+2. **Read port without importing the `app` package (Codex #5):** parse `app/.env` directly
+   (e.g. `grep '^APP_PORT=' app/.env | cut -d= -f2`), default `8000`.
+3. Probe the port:
+   - GET `127.0.0.1:<port>/api/health` and **validate the app marker** (Codex #9, see below).
+     Match → **our app already running**: `open` the browser, exit 0. (No duplicate.)
+   - Port answers but marker mismatches, or port is bound by something else → scan upward for
+     the next free port, use it, print a one-line notice.
    - Free → use it.
-4. First run: if `frontend/out` missing → `(cd frontend && npm ci && npm run build)`.
-5. `uv run uvicorn app.api.app:create_app --factory --host 127.0.0.1 --port <port>` (background).
-6. Poll `/api/health` until healthy (timeout ~30s), then `open http://127.0.0.1:<port>`.
+4. First run: if `frontend/out` missing → `(cd frontend && npm ci && NEXT_PUBLIC_API_BASE="" npm run build)`.
+5. Start `uv run uvicorn app.api.app:create_app --factory --host 127.0.0.1 --port <port>`
+   (background). **Bind-race handling:** if uvicorn exits immediately with "address in use"
+   (lost the race), retry the next free port.
+6. Poll `/api/health` (marker-validated) until healthy (~30s timeout), then
+   `open http://127.0.0.1:<port>`.
 7. Trap to stop uvicorn on exit.
 
-`Catch-Up.app` — minimal macOS bundle:
+**Health marker (Codex #9).** Extend `/api/health` from `{"status":"ok"}` to
+`{"status":"ok","app":"catch-up","version":"<pkg version>"}`. The launcher only treats a port
+as "reuse" when `app == "catch-up"`, preventing false positives from unrelated local services.
+
+`Catch-Up.app` — minimal macOS bundle generated by `scripts/make_app.sh` (not a committed
+binary):
 ```
 Catch-Up.app/Contents/
-  Info.plist                 (CFBundleExecutable=run, CFBundleIconFile=AppIcon)
-  MacOS/run                  (exec's scripts/run.sh, no visible Terminal)
+  Info.plist        (CFBundleExecutable=run, CFBundleIconFile=AppIcon)
+  MacOS/run         (exec's scripts/run.sh, no visible Terminal)
   Resources/AppIcon.icns
 ```
-A `scripts/make_app.sh` generates the bundle so it isn't a committed binary blob (keeps the
-repo clean and lets users rebuild it). Desktop placement = user copies/aliases it.
 
 ### 5. PWA polish
 
-- `frontend/public/manifest.webmanifest` (`name`, `short_name`, `display: standalone`,
-  `start_url: /`, `theme_color`, icons 192/512).
-- `frontend/public/` icons (PNG) + `frontend/app/layout.tsx` `<link rel="manifest">` (Next
-  metadata `manifest` field).
-- No service worker required for installability of a same-origin app; skip it (YAGNI). The
-  manifest alone gives Chrome/Edge "Install app" → standalone windowed icon, as a bonus on
-  top of the `.app` launcher.
+- `frontend/public/manifest.webmanifest` (`display:standalone`, `start_url:/`, theme color,
+  icons 192/512) + `<link rel="manifest">` via Next metadata. No service worker (YAGNI).
+- README notes the PWA window assumes the **default** port; if the launcher had to pick a
+  free port, use the browser the launcher opened.
 
 ### 6. App icon
 
-Generate a simple placeholder icon (a "CU"/newspaper glyph) via a small script
-(`scripts/make_icon.sh` using `sips`/`iconutil`, or a committed 1024×1024 PNG → `.icns` +
-PWA PNGs). User can swap the source PNG later.
+`scripts/make_icon.sh` turns a committed 1024×1024 source PNG (simple "CU"/newspaper glyph)
+into `AppIcon.icns` (`iconutil`) + PWA PNGs (`sips`). User can swap the source later.
 
 ### 7. README "Run it yourself"
 
-New top section in `README.md`:
-- Prereqs: `uv`, Node 20+.
-- Get a **free Gemini API key** (link to Google AI Studio).
-- `git clone …`
-- Build the launcher: `./scripts/make_app.sh` (or just `./scripts/run.sh`).
-- Double-click `Catch-Up.app` (or run `./scripts/run.sh`) → browser opens.
-- Open **Settings**, paste your Gemini key, Save. Optionally "Install app" for a PWA window.
-- **Bold warning:** localhost-only, single-user. Do not expose to the internet without
-  adding real authentication. Each self-hoster uses their own key.
+New top section: prereqs (`uv`, Node 20+); get a **free Gemini key** (AI Studio link);
+`git clone`; `./scripts/make_app.sh` (or just `./scripts/run.sh`); double-click `Catch-Up.app`;
+open **Settings**, paste key, Save; optional PWA "Install app". **Bold warning:** localhost-only,
+single-user — do not expose to the internet without real authentication; each self-hoster uses
+their own key.
+
+### Two-port fallback (Codex #10)
+
+Only if single-port serving proves infeasible: run FastAPI + `next start` behind the same
+launcher. This requires a **build without `output:'export'`** (export + `next start` is invalid),
+so the fallback uses a separate Next config / disables export, and the launcher wires the backend
+URL into the frontend. Single-port is the design; this is documented contingency, not a parallel
+code path we build now.
 
 ## Testing
 
 - **Backend (`tests/unit`, `tests/integration`):**
-  - `GET /api/settings` returns non-secret shape; never leaks the key.
-  - `PUT /api/settings` upserts `app/.env` (uses a tmp env path), updates live Settings,
-    reports `applied`/`restart_required`; validates port range.
-  - localhost guard: non-loopback client → 403.
-  - Static serving: `/` returns the export index; unknown non-API path → SPA fallback;
-    `/api/health` still works.
-- **Frontend (`vitest`):** settings page renders, loads state, submits PUT; api-client method.
-- **Launcher:** manual smoke check (documented in the plan); port-probe logic kept small
-  and shell-testable where practical.
+  - `GET /api/settings` shape; never leaks the key.
+  - `PUT /api/settings` writes via the atomic env writer (tmp path), updates live Settings,
+    overwrites `os.environ["GOOGLE_API_KEY"]`, reports `applied`/`restart_required`; port range
+    validation.
+  - env writer: `#`/quote/space values, concurrent writes, crash-safety, `0600`.
+  - settings write guard: non-loopback client → 403; cross-origin `Origin` → 403; bad `Host` → 403.
+  - static serving: `/` → index; `/digests?run=x` → digests page; `<path>.html` resolution;
+    unknown path → SPA fallback; `/api/*` never falls back; path-traversal blocked;
+    `/api/health` returns the marker.
+- **Frontend (`vitest`):** settings page renders/loads/submits PUT; `/digests?run=` reads the
+  query param and fetches; api-client + health-pill use the relative base when
+  `NEXT_PUBLIC_API_BASE=""`.
+- **Launcher:** port-read parses `app/.env` without importing `app`; marker validation logic;
+  manual smoke check documented in the plan.
 
 ## Out of scope (YAGNI)
 
-- Auth / multi-user / hosted URL.
-- Service worker / offline mode.
-- Windows/Linux launchers (macOS `.app` only; `run.sh` works cross-platform as fallback).
-- Editing GNews/other keys in the UI (stay in `.env`).
+- Auth / multi-user / hosted URL; service worker / offline; Windows/Linux launchers
+  (`run.sh` is the cross-platform fallback); editing GNews/other keys in the UI.
 
-## Risks
+## Codex review #1 — dispositions
 
-| Risk | Mitigation |
-|---|---|
-| Static export rejects `digests/[runId]` | Client-render → query-param refactor → two-port fallback (ordered) |
-| genai client caches key at import | Verify per-call construction; else document restart caveat for key too |
-| Port auto-pick confuses the PWA (pinned to default) | README notes PWA assumes default port; `.app`/`run.sh` always open the actual port |
-| User exposes localhost app publicly | Bind `127.0.0.1`; localhost guard on settings; bold README warning |
+All 10 findings FIXED in this revision: #1 query-param route (blocker); #2 Next-aware
+resolver; #3 same-origin build; #4 `app_port`/`app_host` + precedence note; #5 launcher reads
+`.env` without importing `app`; #6 TrustedHost + Origin check on writes; #7 overwrite
+`os.environ` + "next run" semantics; #8 atomic/quoted/0600 env writer; #9 health app marker;
+#10 fallback disables export. Ledger persisted at `.claude/codex-reviews/`.
