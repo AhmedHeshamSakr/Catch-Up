@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/layout/theme-provider";
@@ -21,6 +21,16 @@ const ibmPlexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Catch-Up Console",
   description: "Multi-agent news intelligence platform",
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: "/icon.svg",
+    apple: "/apple-touch-icon.png",
+  },
+  appleWebApp: { capable: true, title: "Catch-Up", statusBarStyle: "default" },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#10B981",
 };
 
 export default function RootLayout({

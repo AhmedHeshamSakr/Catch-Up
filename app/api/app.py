@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import hmac
+import importlib.metadata
 import logging
+import os
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import (
     APIRouter,
@@ -12,12 +16,23 @@ from fastapi import (
     Header,
     HTTPException,
     Query,
+    Request,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
 from app.api.schemas import DashboardOut, ResolveIn, ResolveOut, RunDetail
-from app.core.config import Settings, SourceConfig, load_sources
+from app.api.static import mount_console
+from app.core.config import (
+    REPO_ROOT,
+    Settings,
+    SourceConfig,
+    detect_env_shadow,
+    load_sources,
+)
 from app.core.domain import Category, Importance
+from app.core.env_store import upsert_env
+from app.llm.runtime import configure_genai
 from app.run_trigger import try_start_run
 from app.runner import build_storage, run_digest
 from app.services import config_store, feed_discovery, youtube_resolve
@@ -26,6 +41,48 @@ from app.services.scheduler import build_scheduler
 from app.services.watchlist import Watchlist, load_watchlist
 
 logger = logging.getLogger(__name__)
+
+# Identity returned by /api/health so the desktop launcher can tell "our app is
+# already on this port" (reuse) apart from an unrelated local service.
+APP_MARKER = "catch-up"
+try:
+    APP_VERSION = importlib.metadata.version("catch-up")
+except importlib.metadata.PackageNotFoundError:  # pragma: no cover
+    APP_VERSION = "0.0.0"
+
+# Loopback identities for the Settings write guard.
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+_LOOPBACK_IPS = {"127.0.0.1", "::1"}
+
+
+def _hostname(value: str) -> str:
+    """Lowercased hostname of a ``host[:port]`` or full URL ('' if unparseable)."""
+    return (urlsplit(value if "//" in value else f"//{value}").hostname or "").lower()
+
+
+def _require_local_write(request: Request) -> None:
+    """Gate the Settings surface to local, same-origin callers.
+
+    The Settings endpoints persist secrets to disk, so loopback bind alone is not
+    enough on a local web server. Require: a loopback connecting socket, a loopback
+    ``Host`` header (DNS-rebinding defense), and a loopback ``Origin``/``Referer``
+    when present (CSRF defense).
+    """
+    client_host = request.client.host if request.client else ""
+    if client_host not in _LOOPBACK_IPS:
+        raise HTTPException(status_code=403, detail="settings are local-only")
+    if _hostname(request.headers.get("host", "")) not in _LOOPBACK_HOSTS:
+        raise HTTPException(status_code=403, detail="settings are local-only")
+    ref = request.headers.get("origin") or request.headers.get("referer")
+    if ref and _hostname(ref) not in _LOOPBACK_HOSTS:
+        raise HTTPException(status_code=403, detail="settings are local-only")
+
+
+class SettingsPatch(BaseModel):
+    """Body for PUT /api/settings. Both fields optional (patch semantics)."""
+
+    google_api_key: str | None = None
+    app_port: int | None = Field(default=None, ge=1024, le=65535)
 
 
 # Cap on the number of news items pulled to compute dashboard category counts.
@@ -100,11 +157,61 @@ def register_product_routes(
     def storage():
         return build_storage(settings)
 
+    require_local = Depends(_require_local_write)
+
     # /health is intentionally public (liveness probe). Every other route
     # requires the key WHEN one is configured (no-op when api_key is unset).
     @api.get("/health")
     def health() -> dict[str, str]:
-        return {"status": "ok"}
+        return {"status": "ok", "app": APP_MARKER, "version": APP_VERSION}
+
+    # Local desktop Settings surface. Local-only (no api_key needed): the write
+    # guard restricts both routes to loopback/same-origin callers.
+    @api.get("/settings", dependencies=[require_local])
+    def get_settings() -> dict[str, object]:
+        # Non-secret only: the key value is NEVER returned, just whether one is set.
+        # shadowed_keys warns the UI when a root .env overrides app/.env so a save
+        # isn't silently ignored on next launch.
+        return {
+            "app_host": settings.app_host,
+            "app_port": settings.app_port,
+            "gemini_key_set": bool(settings.google_api_key),
+            "shadowed_keys": detect_env_shadow(REPO_ROOT),
+        }
+
+    @api.put("/settings", dependencies=[require_local])
+    def put_settings(body: SettingsPatch) -> dict[str, list[str]]:
+        # python-dotenv interpolates ${VAR}/$VAR on load regardless of quoting, so a
+        # '$' in the stored key would corrupt it on the next launch — reject it.
+        if body.google_api_key is not None and "$" in body.google_api_key:
+            raise HTTPException(status_code=422, detail="key must not contain '$'")
+
+        applied: list[str] = []
+        restart_required: list[str] = []
+        updates: dict[str, str] = {}
+        if body.google_api_key is not None:
+            updates["GOOGLE_API_KEY"] = body.google_api_key
+            applied.append("google_api_key")
+        if body.app_port is not None:
+            updates["APP_PORT"] = str(body.app_port)
+            restart_required.append("app_port")
+
+        # Persist FIRST: if the write fails we must NOT have changed live state —
+        # the request 500s with the process untouched.
+        if updates:
+            upsert_env(settings.env_path, updates)
+
+        # Now apply to the live process.
+        if body.google_api_key is not None:
+            # Overwrite os.environ directly (configure_genai only sets-if-absent);
+            # applies to the NEXT run / next genai client, not mid-run.
+            settings.google_api_key = body.google_api_key
+            os.environ["GOOGLE_API_KEY"] = body.google_api_key
+            configure_genai(settings)
+        if body.app_port is not None:
+            settings.app_port = body.app_port
+
+        return {"applied": applied, "restart_required": restart_required}
 
     @api.get("/dashboard", response_model=DashboardOut, dependencies=[require_api_key])
     def dashboard() -> DashboardOut:
@@ -216,6 +323,17 @@ def create_app(
     """Standalone product API (run by ``catchup serve``)."""
     settings = settings or Settings()
 
+    # A stray root .env silently overrides app/.env (pydantic env_file precedence),
+    # which would make UI/Settings key-saves to app/.env look ignored. Warn loudly.
+    shadowed = detect_env_shadow(REPO_ROOT)
+    if shadowed:
+        logger.warning(
+            "Root .env shadows app/.env for: %s. pydantic gives the root .env "
+            "precedence, so Settings-page writes to app/.env are ignored for those "
+            "keys. Remove them from the root .env (or edit the root .env instead).",
+            ", ".join(shadowed),
+        )
+
     @asynccontextmanager
     async def _lifespan(app: FastAPI):
         scheduler = build_scheduler(
@@ -243,4 +361,8 @@ def create_app(
         resolve_channel_id_fn=resolve_channel_id_fn,
         discover_feed_fn=discover_feed_fn,
     )
+    # Single-port desktop mode: serve the built console at / (after /api so API
+    # routes win). Only when the export exists — server/CI runs skip this.
+    if Path(settings.console_dir).is_dir():
+        mount_console(app, settings.console_dir)
     return app

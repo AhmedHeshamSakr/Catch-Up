@@ -13,6 +13,41 @@ from app.core.domain import Category, Importance, SourceType
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _env_keys(path: Path) -> set[str]:
+    """KEY names defined in a dotenv file (ignores blanks/comments)."""
+    if not path.is_file():
+        return set()
+    keys: set[str] = set()
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key = line.split("=", 1)[0].strip()
+        if key.startswith("export "):
+            key = key[len("export ") :].strip()
+        if key:
+            keys.add(key)
+    return keys
+
+
+# Keys the desktop Settings page writes to app/.env. A root .env defining any of
+# these silently overrides our write (pydantic env_file precedence: later file wins).
+_MANAGED_ENV_KEYS = ("GOOGLE_API_KEY", "APP_PORT")
+
+
+def detect_env_shadow(repo_root: Path) -> list[str]:
+    """Managed keys defined in ``<repo_root>/.env`` that would override ``app/.env``.
+
+    The Settings page writes ``GOOGLE_API_KEY``/``APP_PORT`` to ``app/.env``, but
+    pydantic-settings gives the root ``.env`` higher precedence. So any managed key
+    present in the root ``.env`` — whether or not ``app/.env`` also defines it — is a
+    key whose UI save is silently ignored on next launch. Surfaced as a warning.
+    Returns [] when there is no root ``.env`` (the common case).
+    """
+    root = _env_keys(repo_root / ".env")
+    return sorted(k for k in _MANAGED_ENV_KEYS if k in root)
+
+
 class SourceConfig(BaseModel):
     id: str
     type: SourceType
@@ -101,6 +136,21 @@ class Settings(BaseSettings):
     critic_max_reflections: int = 1
     # API security. api_key=None leaves the API open (local/dev default).
     api_key: str | None = None
+    # Local desktop single-port serving. The launcher reads app_port from app/.env
+    # (parsed directly, NOT by importing this package) and binds uvicorn to
+    # app_host:app_port; the same process serves the built console + /api. Default
+    # 127.0.0.1 keeps the app off the network; the UI Settings page can change the
+    # port (takes effect on next launch).
+    app_host: str = "127.0.0.1"
+    app_port: int = 8000
+    # The dotenv file the Settings page persists key/port to. Defaults to the same
+    # app/.env that Settings reads on next launch; injectable so tests never touch
+    # the real file.
+    env_path: str = str(REPO_ROOT / "app" / ".env")
+    # Built Next.js console (static export) served at / in single-port desktop
+    # mode. Mounted by create_app only when this directory exists, so server/CI
+    # runs without a frontend build are unaffected.
+    console_dir: str = str(REPO_ROOT / "frontend" / "out")
     # Token-bucket rate limit for POST /runs and POST /sources/resolve.
     rate_limit_burst: int = 30
     rate_limit_refill_per_sec: float = 1.0

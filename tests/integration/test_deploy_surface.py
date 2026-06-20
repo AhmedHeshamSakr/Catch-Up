@@ -29,7 +29,9 @@ def test_register_product_routes_mounts_api_on_any_app(tmp_path):
     app = FastAPI()  # a bare app, standing in for the ADK deploy app
     register_product_routes(app, _settings(tmp_path))
     client = TestClient(app)
-    assert client.get("/api/health").json() == {"status": "ok"}
+    health = client.get("/api/health").json()
+    assert health["status"] == "ok"
+    assert health["app"] == "catch-up"  # marker for the launcher's reuse-detection
     # A real product route is live (not just health) — proves the frontend's
     # /api/* calls would reach a backend in the deployed container.
     r = client.get("/api/dashboard")

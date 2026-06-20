@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
 import { SearchX, AlertTriangle } from "lucide-react";
 import { useRun } from "@/lib/hooks";
 import { PageHeader } from "@/components/layout/page-header";
@@ -39,8 +38,8 @@ function RunDetailSkeleton() {
   );
 }
 
-export default function RunDetailPage() {
-  const { runId } = useParams<{ runId: string }>();
+/** Digest run detail, addressed by ``/digests?run=<id>`` (static-export friendly). */
+export function RunDetail({ runId }: { runId: string }) {
   const { data, error, isLoading } = useRun(runId ?? null);
 
   const is404 =

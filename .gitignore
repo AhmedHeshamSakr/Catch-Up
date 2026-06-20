@@ -44,6 +44,8 @@ yarn-error.log*
 # --- Tooling / local ---
 .superpowers/
 .claude/settings.local.json
+.claude/checkpoints/
 .DS_Store
 .idea/
 .vscode/
+.run/
