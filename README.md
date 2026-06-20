@@ -14,6 +14,40 @@ Cloud Scheduler + Vertex AI + Firestore) by configuration — not a rewrite.
 🚧 Early development. Design is approved — see
 [`docs/superpowers/specs/2026-05-23-adk-catchup-agent-design.md`](docs/superpowers/specs/2026-05-23-adk-catchup-agent-design.md).
 
+## Run it as a desktop app (local, single-user)
+
+> ⚠️ **This is a single-user, localhost-only tool.** It binds to `127.0.0.1`, and the
+> in-app Settings page lets you set your Gemini key from the UI — which is safe **only**
+> because it never leaves your machine. **Do not expose it to the internet** without adding
+> real authentication first. Each person who self-hosts uses **their own** Gemini key.
+
+One process serves the built console **and** the API on a single port, wrapped in a
+double-clickable macOS app.
+
+**Prerequisites:** [`uv`](https://docs.astral.sh/uv/), Node 20+ (`npm`), and — only if you
+want to regenerate the icon — `librsvg` (`brew install librsvg`).
+
+```bash
+git clone <this-repo> && cd ADK-CATCH-UP-Agent
+./scripts/make_app.sh            # builds build/Catch-Up.app (with a custom icon)
+```
+
+1. Drag **`Catch-Up.app`** to your Desktop (or Applications) and **double-click** it.
+   The first launch builds the console (~1–2 min); a notification tells you when it's ready.
+2. It opens in a **standalone window** (no browser tabs/address bar). If you only have
+   Safari, it opens a normal tab — use **Safari ▸ Add to Dock** for a chromeless window.
+3. Go to **Settings**, paste your **free Gemini key** from
+   [Google AI Studio](https://aistudio.google.com/apikey), and **Save** (applies on the next run).
+4. *(Optional)* In the window, **Install app** (Chrome) or **Add to Dock** (Safari) for a
+   permanent Dock icon.
+
+**Prefer no app bundle?** Just run `./scripts/run.sh` (or `uv run python -m app.cli serve`
+after building the console with `cd frontend && NEXT_PUBLIC_API_BASE="" npm run build`).
+
+**Ports.** Default `8000`, changeable in **Settings** (saved to `app/.env`, applies on the
+next launch). If `8000` is busy, the launcher automatically uses the next free port. Stop the
+server with `./scripts/stop.sh`.
+
 ## Architecture (at a glance)
 
 ```
@@ -71,7 +105,7 @@ uv run python -m app.cli serve --host 0.0.0.0 --port 8080
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/health` | Liveness check — returns `{"status":"ok"}` |
+| `GET /api/health` | Liveness check — returns `{"status":"ok","app":"catch-up","version":"…"}` |
 | `GET /api/dashboard` | Latest run, recent runs, category counts, total items |
 | `GET /api/news` | News items (filterable by `category` + `importance`) |
 | `GET /api/runs` | Recent digest runs |
@@ -82,6 +116,8 @@ uv run python -m app.cli serve --host 0.0.0.0 --port 8080
 | `GET /api/watchlist` | Watchlist entities + keywords |
 | `PUT /api/watchlist` | Update watchlist |
 | `POST /api/runs` | Trigger a new digest run (async) |
+| `GET /api/settings` | Non-secret local config (`app_port`, `gemini_key_set`) — loopback only |
+| `PUT /api/settings` | Set Gemini key (live) / port (next launch) — loopback + same-origin only |
 | `GET /docs` | FastAPI auto-generated interactive docs (OpenAPI) |
 
 ## Web Console
