@@ -136,6 +136,10 @@ class Settings(BaseSettings):
     # port (takes effect on next launch).
     app_host: str = "127.0.0.1"
     app_port: int = 8000
+    # The dotenv file the Settings page persists key/port to. Defaults to the same
+    # app/.env that Settings reads on next launch; injectable so tests never touch
+    # the real file.
+    env_path: str = str(REPO_ROOT / "app" / ".env")
     # Token-bucket rate limit for POST /runs and POST /sources/resolve.
     rate_limit_burst: int = 30
     rate_limit_refill_per_sec: float = 1.0
