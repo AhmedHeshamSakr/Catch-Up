@@ -81,20 +81,33 @@ if is_our_app "$PORT"; then
 fi
 
 # Serialize concurrent cold starts (Codex #5): only one launch picks a port and
-# starts a server at a time. A waiting launch opens the winner's server as soon as
-# it's healthy, so two double-clicks never start two servers.
+# starts a server at a time. The lock dir carries the holder's PID; a waiter only
+# steals it if that PID is DEAD (so a long first-run build is never falsely stolen),
+# and opens the winner's server the moment it's healthy. Two double-clicks never
+# start two servers.
 LOCK="$RUN_DIR/launch.lock"
-acquired=0
-for _ in $(seq 1 200); do
-  if mkdir "$LOCK" 2>/dev/null; then acquired=1; break; fi
-  if is_our_app "$(read_port)"; then open_app "http://127.0.0.1:$(read_port)"; exit 0; fi
-  sleep 0.3
-done
-if [ "$acquired" -eq 0 ]; then  # stale lock — take it over
-  rmdir "$LOCK" 2>/dev/null || true
-  mkdir "$LOCK" 2>/dev/null || true
+OWNER="$LOCK/owner.pid"
+acquire_lock() {
+  local i owner
+  for i in $(seq 1 600); do   # up to ~3 min (covers the first-run build)
+    if mkdir "$LOCK" 2>/dev/null; then echo $$ >"$OWNER"; return 0; fi
+    if is_our_app "$(read_port)"; then open_app "http://127.0.0.1:$(read_port)"; exit 0; fi
+    owner="$(cat "$OWNER" 2>/dev/null || echo)"
+    if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
+      rm -f "$OWNER" 2>/dev/null || true   # holder is dead — reclaim
+      rmdir "$LOCK" 2>/dev/null || true
+      continue
+    fi
+    sleep 0.3
+  done
+  return 1
+}
+if ! acquire_lock; then
+  note "Another launch is in progress — opening when it's ready."
+  open_app "http://127.0.0.1:$(read_port)"
+  exit 0
 fi
-trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT INT TERM
+trap 'rm -f "$OWNER" 2>/dev/null || true; rmdir "$LOCK" 2>/dev/null || true' EXIT INT TERM
 
 # Re-check under the lock (the winner may have just brought it up).
 PORT="$(read_port)"

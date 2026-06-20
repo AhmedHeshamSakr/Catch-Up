@@ -129,3 +129,21 @@ def test_detect_env_shadow_empty_without_root_env(tmp_path):
     (tmp_path / "app").mkdir()
     (tmp_path / "app" / ".env").write_text("GOOGLE_API_KEY=app\n", encoding="utf-8")
     assert detect_env_shadow(tmp_path) == []
+
+
+def test_detect_env_shadow_flags_root_managed_key_even_if_app_lacks_it(tmp_path):
+    # The nastier case: root .env owns the key, app/.env doesn't define it yet — a
+    # UI save to app/.env is still overridden, so it MUST be flagged.
+    from app.core.config import detect_env_shadow
+
+    (tmp_path / ".env").write_text("GOOGLE_API_KEY=root\nAPP_PORT=9000\n", encoding="utf-8")
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / ".env").write_text("APP_HOST=127.0.0.1\n", encoding="utf-8")
+    assert detect_env_shadow(tmp_path) == ["APP_PORT", "GOOGLE_API_KEY"]
+
+
+def test_detect_env_shadow_ignores_unmanaged_root_keys(tmp_path):
+    from app.core.config import detect_env_shadow
+
+    (tmp_path / ".env").write_text("SOME_OTHER=1\n", encoding="utf-8")
+    assert detect_env_shadow(tmp_path) == []

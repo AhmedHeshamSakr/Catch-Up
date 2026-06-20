@@ -67,6 +67,16 @@ export default function SettingsPage() {
       toast.success("Settings saved", {
         description: bits.join(" ") || "No changes.",
       });
+
+      // Refetch so key-configured + shadowed-keys state stay accurate post-save.
+      try {
+        const fresh = await api.getSettings();
+        setKeySet(fresh.gemini_key_set);
+        setLoadedPort(fresh.app_port);
+        setShadowed(fresh.shadowed_keys ?? []);
+      } catch {
+        /* non-fatal: the save itself succeeded */
+      }
     } catch (e) {
       const msg =
         e instanceof ApiError && e.status === 403

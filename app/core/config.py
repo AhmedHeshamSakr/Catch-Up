@@ -30,15 +30,22 @@ def _env_keys(path: Path) -> set[str]:
     return keys
 
 
-def detect_env_shadow(repo_root: Path) -> list[str]:
-    """Keys defined in BOTH ``<repo_root>/.env`` and ``<repo_root>/app/.env``.
+# Keys the desktop Settings page writes to app/.env. A root .env defining any of
+# these silently overrides our write (pydantic env_file precedence: later file wins).
+_MANAGED_ENV_KEYS = ("GOOGLE_API_KEY", "APP_PORT")
 
-    pydantic-settings gives the later env_file (root ``.env``) precedence, so any
-    key returned here is one where a stray root ``.env`` silently overrides
-    ``app/.env`` — surfaced as a startup warning so a UI key-save isn't mysteriously
-    ignored. Returns [] when there is no root ``.env`` (the common case).
+
+def detect_env_shadow(repo_root: Path) -> list[str]:
+    """Managed keys defined in ``<repo_root>/.env`` that would override ``app/.env``.
+
+    The Settings page writes ``GOOGLE_API_KEY``/``APP_PORT`` to ``app/.env``, but
+    pydantic-settings gives the root ``.env`` higher precedence. So any managed key
+    present in the root ``.env`` — whether or not ``app/.env`` also defines it — is a
+    key whose UI save is silently ignored on next launch. Surfaced as a warning.
+    Returns [] when there is no root ``.env`` (the common case).
     """
-    return sorted(_env_keys(repo_root / ".env") & _env_keys(repo_root / "app" / ".env"))
+    root = _env_keys(repo_root / ".env")
+    return sorted(k for k in _MANAGED_ENV_KEYS if k in root)
 
 
 class SourceConfig(BaseModel):
