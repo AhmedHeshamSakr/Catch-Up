@@ -91,3 +91,41 @@ def test_greenlet_and_aiosqlite_importable():
     # DatabaseSessionService's async SQLite engine needs both at runtime.
     import aiosqlite  # noqa: F401
     import greenlet  # noqa: F401
+
+
+def test_app_port_host_defaults(monkeypatch):
+    # Desktop single-port launcher reads these; default to localhost:8000.
+    for k in ("APP_PORT", "APP_HOST"):
+        monkeypatch.delenv(k, raising=False)
+    s = Settings(_env_file=None)
+    assert s.app_port == 8000
+    assert s.app_host == "127.0.0.1"
+
+
+def test_app_port_host_from_env(monkeypatch):
+    monkeypatch.setenv("APP_PORT", "9123")
+    monkeypatch.setenv("APP_HOST", "0.0.0.0")
+    s = Settings(_env_file=None)
+    assert s.app_port == 9123
+    assert s.app_host == "0.0.0.0"
+
+
+def test_detect_env_shadow_returns_overlapping_keys(tmp_path):
+    # A root .env that re-defines a key in app/.env silently wins (pydantic
+    # env_file later-file precedence), which would make a UI key-save look broken.
+    from app.core.config import detect_env_shadow
+
+    (tmp_path / ".env").write_text("GOOGLE_API_KEY=root\nUNIQUE_ROOT=1\n", encoding="utf-8")
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / ".env").write_text(
+        "GOOGLE_API_KEY=app\n# comment\nAPP_PORT=8000\n", encoding="utf-8"
+    )
+    assert detect_env_shadow(tmp_path) == ["GOOGLE_API_KEY"]
+
+
+def test_detect_env_shadow_empty_without_root_env(tmp_path):
+    from app.core.config import detect_env_shadow
+
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / ".env").write_text("GOOGLE_API_KEY=app\n", encoding="utf-8")
+    assert detect_env_shadow(tmp_path) == []

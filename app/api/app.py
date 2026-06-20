@@ -16,7 +16,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.schemas import DashboardOut, ResolveIn, ResolveOut, RunDetail
-from app.core.config import Settings, SourceConfig, load_sources
+from app.core.config import REPO_ROOT, Settings, SourceConfig, detect_env_shadow, load_sources
 from app.core.domain import Category, Importance
 from app.run_trigger import try_start_run
 from app.runner import build_storage, run_digest
@@ -215,6 +215,17 @@ def create_app(
 ) -> FastAPI:
     """Standalone product API (run by ``catchup serve``)."""
     settings = settings or Settings()
+
+    # A stray root .env silently overrides app/.env (pydantic env_file precedence),
+    # which would make UI/Settings key-saves to app/.env look ignored. Warn loudly.
+    shadowed = detect_env_shadow(REPO_ROOT)
+    if shadowed:
+        logger.warning(
+            "Root .env shadows app/.env for: %s. pydantic gives the root .env "
+            "precedence, so Settings-page writes to app/.env are ignored for those "
+            "keys. Remove them from the root .env (or edit the root .env instead).",
+            ", ".join(shadowed),
+        )
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI):

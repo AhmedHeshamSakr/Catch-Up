@@ -13,6 +13,34 @@ from app.core.domain import Category, Importance, SourceType
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _env_keys(path: Path) -> set[str]:
+    """KEY names defined in a dotenv file (ignores blanks/comments)."""
+    if not path.is_file():
+        return set()
+    keys: set[str] = set()
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key = line.split("=", 1)[0].strip()
+        if key.startswith("export "):
+            key = key[len("export ") :].strip()
+        if key:
+            keys.add(key)
+    return keys
+
+
+def detect_env_shadow(repo_root: Path) -> list[str]:
+    """Keys defined in BOTH ``<repo_root>/.env`` and ``<repo_root>/app/.env``.
+
+    pydantic-settings gives the later env_file (root ``.env``) precedence, so any
+    key returned here is one where a stray root ``.env`` silently overrides
+    ``app/.env`` — surfaced as a startup warning so a UI key-save isn't mysteriously
+    ignored. Returns [] when there is no root ``.env`` (the common case).
+    """
+    return sorted(_env_keys(repo_root / ".env") & _env_keys(repo_root / "app" / ".env"))
+
+
 class SourceConfig(BaseModel):
     id: str
     type: SourceType
@@ -101,6 +129,13 @@ class Settings(BaseSettings):
     critic_max_reflections: int = 1
     # API security. api_key=None leaves the API open (local/dev default).
     api_key: str | None = None
+    # Local desktop single-port serving. The launcher reads app_port from app/.env
+    # (parsed directly, NOT by importing this package) and binds uvicorn to
+    # app_host:app_port; the same process serves the built console + /api. Default
+    # 127.0.0.1 keeps the app off the network; the UI Settings page can change the
+    # port (takes effect on next launch).
+    app_host: str = "127.0.0.1"
+    app_port: int = 8000
     # Token-bucket rate limit for POST /runs and POST /sources/resolve.
     rate_limit_burst: int = 30
     rate_limit_refill_per_sec: float = 1.0
