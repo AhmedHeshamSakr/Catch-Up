@@ -29,7 +29,8 @@ Cloud production at low cost** is a configuration/deployment change — not a re
 
 ### Non-Goals (v1, deferred)
 - Email / push delivery (later phase).
-- Full multi-tenant auth/RBAC enabled (architecture supports it; v1 ships single-user).
+- Multi-tenant auth/RBAC. v1 is **single-user**; the early `org_id`/`user_id` keys were
+  removed as vestigial (§10), so multi-tenancy is a future schema change, not a toggle.
 - Mobile app.
 - Real-time/event-driven alerting (v1 is scheduled batch).
 
@@ -106,7 +107,6 @@ class Sentiment(str, Enum): POSITIVE; NEUTRAL; NEGATIVE
 class Entity(BaseModel): name: str; type: Literal["company","person","org","place"]
 class NewsItem(BaseModel):
     id: str                  # sha256(url)
-    org_id: str; user_id: str            # multi-tenant keys (single value in v1)
     source_id: str; source_type: SourceType; source_name: str
     url: HttpUrl; title: str; excerpt: str | None
     published_at: datetime | None; collected_at: datetime
@@ -115,12 +115,11 @@ class NewsItem(BaseModel):
     importance: Importance | None; importance_score: float | None  # 0..1 raw
     entities: list[Entity] = []
     sentiment: Sentiment | None
-    language: str | None
     status: Literal["raw","processed","filtered"]
     digest_run_id: str | None
 
 class DigestRun(BaseModel):
-    run_id: str; org_id: str
+    run_id: str
     started_at; finished_at; status: Literal["running","success","partial","failed"]
     collected: int; new: int; processed: int; high_importance: int
     outputs: dict[str, str]              # {"xlsx": path, "html": path, "md": path}
@@ -222,8 +221,12 @@ were never built — see §21.)*
 
 ## 15. Security & Multi-Tenancy
 
-- **Multi-tenant data model** from day 1 (`org_id`/`user_id` on all records); v1 uses a single default tenant; enabling auth later is a toggle, not a migration.
-- **AuthN/Z (prod):** Firebase Auth / Identity Platform; RBAC roles (admin, editor, viewer); per-org data isolation enforced in the repository layer.
+- **Single-user (as built):** v1 ships single-user — no per-record tenant keys. The
+  original `org_id`/`user_id` columns were never used in any query path and were removed
+  (§10); real multi-tenancy is future work (a schema change, not a config toggle).
+- **AuthN/Z (prod):** the network perimeter is the auth boundary — API key for service
+  calls + Cloud Run IAM/IAP for users (see README "Deployment"). RBAC roles
+  (admin/editor/viewer) and per-org isolation are future, gated on the multi-tenant model.
 - **Secrets:** never in code/repo; `.env` locally, Secret Manager in prod; `.gitignore` covers keys/SA JSON.
 - **Input sanitization & SSRF protection** for user-provided source URLs (allowlist schemes, block internal IP ranges, size/time limits on fetches).
 - **Prompt-injection defense:** fetched article content is data, not instructions — delimited, labeled untrusted; system prompts forbid following embedded instructions; outputs schema-constrained.
@@ -245,7 +248,8 @@ were never built — see §21.)*
 - Accents: **emerald** (`#059669` light / `#34D399` dark) + **cyan** (`#0891B2`); semantic red/amber/green for importance/health.
 - **Light + Dark**, default **Auto = system** (`prefers-color-scheme`).
 - **Lucide outline icons** (no emoji); 8-pt spacing grid; AA contrast; shared component system (shadcn/ui).
-- Enterprise left sidebar: brand lockup + **workspace switcher** (multi-tenant entry) + grouped nav + profile footer.
+- Enterprise left sidebar: brand lockup + grouped nav + profile footer. *(A workspace
+  switcher is deferred with multi-tenancy — see §15.)*
 
 ### Information architecture (screens)
 1. **Dashboard** — stats, "what matters most", by-category breakdown, recent-run health.
@@ -257,15 +261,24 @@ were never built — see §21.)*
 7. **Runs & Schedule** — schedule config; run history + per-source diagnostics.
 8. **Settings** — provider toggle (AI Studio/Vertex), API keys, output prefs; (Organization/Members — later).
 
-### API surface (FastAPI, illustrative)
+> **As built:** Dashboard, Digests, **News** (filterable feed), Sources, Watchlist, and
+> Settings ship today. **Categories (5), Pipeline (6), and Runs & Schedule (7) are not yet
+> built** — that's the deferred "console screens" milestone (their `/api/categories` and
+> `/api/pipeline/config` endpoints don't exist yet either; see §17).
+
+### API surface (FastAPI — as built)
 ```
-GET  /api/dashboard
-GET  /api/digests            POST /api/digests/run
-GET  /api/runs  /api/runs/{id}
-CRUD /api/sources  /api/watchlist  /api/categories
-GET/PUT /api/pipeline/config   GET /api/settings  PUT /api/settings
-GET  /api/news  (search/filter)
+GET     /api/health   /api/dashboard
+GET     /api/runs   /api/runs/{id}      POST /api/runs      # trigger a digest run (409 if busy)
+GET     /api/news   (search/filter)
+GET/PUT /api/sources                    POST /api/sources/resolve
+GET/PUT /api/watchlist
+GET/PUT /api/settings
+GET     /{path}   (static console mount; SPA fallback)
 ```
+*Not yet built (the deferred "console screens" milestone — §16 screens 6–8):
+`/api/categories`, `/api/pipeline/config`, and a dedicated `/api/digests` (digests are
+currently a frontend view over `/api/runs` + `/api/news`, not a backend resource).*
 
 ## 18. Configuration
 
@@ -277,7 +290,7 @@ GET  /api/news  (search/filter)
 ## 19. Deployment Phasing
 
 - **v1 (free, local):** AI Studio key + SQLite + APScheduler; `adk web`/CLI + `next dev`. $0.
-- **Production:** flip `GOOGLE_GENAI_USE_VERTEXAI=TRUE`; Dockerize; deploy API to **Cloud Run**; **Cloud Scheduler** → `/api/digests/run`; **Firestore** backend; Secret Manager; frontend on Vercel/Cloud Run. Lowest-cost serverless, scale-to-zero.
+- **Production:** flip `GOOGLE_GENAI_USE_VERTEXAI=TRUE`; Dockerize; deploy to **Cloud Run** (the product image serves console + `/api` same-origin); **Cloud Scheduler** → `POST /api/runs`; **Firestore** backend; Secret Manager. Lowest-cost serverless, scale-to-zero. See README "Deployment" for the three concrete paths.
 
 ## 20. Testing Strategy (TDD)
 
@@ -349,4 +362,4 @@ section originally sketched):
 
 **Future work:**
 - Email / push delivery (deferred phase).
-- Multi-tenant auth rollout timing (architecture ready; enable when needed).
+- Multi-tenancy (re-introduce tenant keys + auth/RBAC) — a schema change when needed.
