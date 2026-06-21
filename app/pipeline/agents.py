@@ -358,6 +358,15 @@ class GuardrailCriticAgent(BaseAgent):
                     )
                 run.flagged = outcome["flagged"]
                 run.critic_verdicts = outcome["verdicts"]
+                # Reflection ran but its reprocessor was down — items are still
+                # protected (flagged/redacted), but record the degradation so a
+                # broken reflection subsystem is observable, not silent.
+                if outcome.get("degraded"):
+                    run.source_errors.append({
+                        "stage": "critic", "phase": "reflection",
+                        "error": "reflection reprocessor failed; affected items flagged/redacted",
+                        "ts": _now(), "degraded": True,
+                    })
         except Exception as exc:
             run.source_errors.append(
                 {"stage": "critic", "error": str(exc), "ts": _now(), "degraded": True}

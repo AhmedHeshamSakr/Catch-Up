@@ -113,14 +113,16 @@ def test_apply_verdicts_flag_redacts_unfaithful():
 
 
 def test_apply_verdicts_replace_with_suggestion_not_redacted():
-    """A replace with a suggested faithful summary keeps the suggestion, not redacted."""
+    """A replace with a suggested faithful summary keeps the English suggestion,
+    but drops the Arabic (the verdict carries no AR suggestion, so the old AR is
+    unverified and must not ship next to corrected English)."""
     item = _make_item("r1", "T", summary_en="Original.", summary_ar="أصلي.")
     item.status = "processed"
     verdicts = [FaithfulnessVerdict(item_id="r1", faithful=False, issues=["x"],
                                     suggested_summary_en="A corrected faithful summary.")]
     apply_verdicts([item], verdicts, "replace", 0.33)
     assert item.summary_en == "A corrected faithful summary."
-    assert item.summary_ar == "أصلي."
+    assert item.summary_ar is None
     assert item.status == "processed"
 
 

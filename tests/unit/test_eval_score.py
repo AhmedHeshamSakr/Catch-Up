@@ -383,3 +383,43 @@ def test_calibrate_judge_empty():
     assert result["n_items"] == 0
     assert result["overall"]["accuracy"] == 0.0
     assert result["overall"]["n"] == 0
+
+
+def test_calibrate_judge_missing_verdict_counts_against_judge():
+    """A gold item the judge never returned a verdict for must count (as wrong),
+    not be silently skipped — else a partial judge response inflates accuracy."""
+    expectations = {
+        "seen": {"faithfulness": True, "category_accuracy": True,
+                 "importance_calibration": True, "ar_translation_quality": True},
+        "omitted": {"faithfulness": False, "category_accuracy": True,
+                    "importance_calibration": True, "ar_translation_quality": True},
+    }
+    # Judge returned a correct verdict for "seen" but OMITTED "omitted".
+    verdicts = [_all_dims_verdict("seen", expectations["seen"])]
+    result = calibrate_judge(verdicts, expectations)
+    assert result["n_items"] == 2  # the omitted gold item still counts
+    faith = result["per_dimension"]["faithfulness"]
+    # "omitted" expected faithfulness FAIL; a missing verdict is charged as FP
+    # (it would leak), never credited as a correct TN.
+    assert faith["fp"] == 1
+    assert faith["tn"] == 0
+
+
+def test_aggregate_expected_ids_fails_closed_on_missing_verdict():
+    """With expected_ids, a verdict the judge OMITTED is scored as a hard failure
+    (score 0, not passed) — a partial response can't inflate the pass_rate or slip
+    past the safety-critical faithfulness gate."""
+    verdicts = [_verdict("a")]  # perfect verdict for "a"; "b" omitted
+    report = aggregate(verdicts, expected_ids=["a", "b"])
+    assert report.n == 2
+    assert report.dimension_pass_rate["faithfulness"] == 0.5  # missing "b" fails
+    assert report.dimension_min_score["faithfulness"] == 0.0
+    assert report.passed is False
+    assert "faithfulness" in report.failures
+
+
+def test_aggregate_without_expected_ids_is_legacy():
+    """Without expected_ids only the returned verdicts are scored (back-compat)."""
+    report = aggregate([_verdict("a")])
+    assert report.n == 1
+    assert report.dimension_pass_rate["faithfulness"] == 1.0

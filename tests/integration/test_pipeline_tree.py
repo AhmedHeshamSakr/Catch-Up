@@ -12,6 +12,13 @@ from app.core.config import Settings
 from app.core.domain import Category, RawItem, RunStatus, SourceType
 from app.llm.schema import ItemEnrichment, ProcessingResult
 from app.pipeline.agents import build_pipeline
+from app.pipeline.eval_schema import FaithfulnessVerdict
+
+
+def _pass_critic(items):
+    """A critic that explicitly judges every item faithful (the realistic
+    'nothing to flag' result — an empty list now fails closed)."""
+    return [FaithfulnessVerdict(item_id=i.id, faithful=True) for i in items]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -89,7 +96,7 @@ async def test_pipeline_tree_success(tmp_path):
         collect_fn=fake_collect,
         processor=fake_processor,
         narrator=lambda items: "Narrative text.",
-        critic=lambda items: [],
+        critic=_pass_critic,
     )
 
     await _drive(tree, run_id)

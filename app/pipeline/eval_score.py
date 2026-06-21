@@ -66,8 +66,24 @@ def _dimension_passes(
 def aggregate(
     verdicts: list[EnrichmentVerdict],
     thresholds: dict[str, float] = THRESHOLDS,
+    expected_ids: list[str] | None = None,
 ) -> EvalReport:
-    n = len(verdicts)
+    """Aggregate per-dimension verdicts into a gated report.
+
+    When ``expected_ids`` is given, EVERY expected item is scored: a verdict the
+    judge OMITTED is treated as a hard failure (score 0, not passed) on all
+    dimensions, so a partial/incomplete (but schema-valid) judge response can
+    never inflate the pass_rate or slip past the safety-critical gate. When None
+    (legacy/unit use), only the returned verdicts are scored.
+    """
+    if expected_ids is not None:
+        vmap = {v.item_id: v for v in verdicts}
+        ordered: list[EnrichmentVerdict | None] = [vmap.get(i) for i in expected_ids]
+        n = len(expected_ids)
+    else:
+        ordered = list(verdicts)
+        n = len(ordered)
+
     if n == 0:
         empty = dict.fromkeys(_DIMENSIONS, 0.0)
         return EvalReport(
@@ -84,10 +100,19 @@ def aggregate(
     min_score: dict[str, float] = {}
 
     for dim in _DIMENSIONS:
-        dim_verdicts = [_dim_verdict(v, dim) for v in verdicts]
-        pass_rate[dim] = sum(1 for dv in dim_verdicts if dv.passed) / n
-        mean_score[dim] = sum(dv.score for dv in dim_verdicts) / n
-        min_score[dim] = min(dv.score for dv in dim_verdicts)
+        scores: list[float] = []
+        passes = 0
+        for v in ordered:
+            if v is None:
+                scores.append(0.0)  # missing verdict = fail-closed (score 0)
+                continue
+            dv = _dim_verdict(v, dim)
+            scores.append(dv.score)
+            if dv.passed:
+                passes += 1
+        pass_rate[dim] = passes / n
+        mean_score[dim] = sum(scores) / n
+        min_score[dim] = min(scores)
 
     failures = [
         dim
@@ -186,17 +211,25 @@ def calibrate_judge(
         dim: {"tp": 0, "fp": 0, "fn": 0, "tn": 0} for dim in _DIMENSIONS
     }
 
+    # Iterate the GOLD expectations (not the judge's verdicts): an expected item
+    # the judge OMITTED must still count — otherwise a judge that returns a partial
+    # response inflates its own accuracy by simply not judging the hard items. A
+    # missing verdict is charged as WRONG on every gold dim (FN when the item
+    # should pass, FP when it should fail = it would leak), never as a TN.
+    vmap = {v.item_id: v for v in judge_verdicts}
     n_items = 0
-    for verdict in judge_verdicts:
-        gold = expectations.get(verdict.item_id)
-        if gold is None:
-            continue
+    for item_id, gold in expectations.items():
+        verdict = vmap.get(item_id)
         n_items += 1
         for dim in _DIMENSIONS:
             if dim not in gold:
                 continue
             expected_pass = bool(gold[dim])
-            judged_pass = bool(_dim_verdict(verdict, dim).passed)
+            judged_pass = (
+                bool(_dim_verdict(verdict, dim).passed)
+                if verdict is not None
+                else (not expected_pass)  # missing verdict → forced into wrong bucket
+            )
             cell = per_dimension[dim]
             if expected_pass and judged_pass:
                 cell["tp"] += 1

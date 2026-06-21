@@ -120,10 +120,13 @@ def apply_verdicts(
 
     for item in items:
         verdict = verdict_map.get(item.id)
-        if verdict is None or verdict.faithful:
-            continue  # faithful or no verdict — untouched
+        if verdict is not None and verdict.faithful:
+            continue  # explicitly judged faithful — untouched
 
-        # Item is UNFAITHFUL
+        # UNFAITHFUL, or NO verdict at all. A missing verdict is a FAILURE, not a
+        # pass: the critic returned an incomplete (but schema-valid) response, and
+        # every item here was deliberately selected as high-risk — so we must not
+        # ship it unchecked. Fail closed → flag/redact.
         if action == "flag":
             item.status = "flagged"
             redact_unfaithful(item)
@@ -137,12 +140,15 @@ def apply_verdicts(
             flagged_count += 1
 
         elif action == "replace":
-            if verdict.suggested_summary_en:
-                # The suggestion is the corrected, faithful text — keep it and
-                # do NOT redact or downrank (status stays processed).
+            if verdict is not None and verdict.suggested_summary_en:
+                # The suggestion is the corrected, faithful text — keep it and do
+                # NOT redact or downrank (status stays processed). The verdict has
+                # no Arabic suggestion, so drop the old (now-unverified) AR summary
+                # rather than ship it next to corrected English.
                 item.summary_en = verdict.suggested_summary_en
+                item.summary_ar = None
             else:
-                # Fall back to downrank behavior (and redact the unfaithful text)
+                # No verdict or no suggestion → downrank + redact the unfaithful text.
                 item.status = "flagged"
                 item.importance_score = min(item.importance_score or 0.0, threshold - 0.01)
                 item.importance = score_to_importance(item.importance_score)
@@ -185,6 +191,7 @@ def reflect_and_correct(
 
     items_by_id = {it.id: it for it in selected}
     corrected = 0
+    degraded = False
     budget = settings.critic_max_reflections
 
     # Items still unfaithful after the most recent critique.
@@ -200,8 +207,10 @@ def reflect_and_correct(
         try:
             result = reprocessor(pending, feedback)
         except Exception:
-            # Re-enrichment failed: keep the existing (unfaithful) verdicts so
-            # the items fall through to flag/redact below. Stop reflecting.
+            # Re-enrichment failed: keep the existing (unfaithful) verdicts so the
+            # items fall through to flag/redact below. Record the degradation (so a
+            # down reflection subsystem is observable) and stop reflecting.
+            degraded = True
             break
 
         enrichments = {e.id: e for e in result.items}
@@ -240,4 +249,5 @@ def reflect_and_correct(
         settings.importance_threshold,
     )
     outcome["corrected"] = corrected
+    outcome["degraded"] = degraded
     return outcome

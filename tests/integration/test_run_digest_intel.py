@@ -2,6 +2,13 @@ from app import runner
 from app.core.config import Settings
 from app.core.domain import Category, RawItem, RunStatus, SourceType
 from app.llm.schema import ItemEnrichment, ProcessingResult
+from app.pipeline.eval_schema import FaithfulnessVerdict
+
+
+def _pass_critic(items):
+    """Explicitly judge every item faithful — the realistic 'nothing to flag'
+    result (an empty verdict list now fails closed for selected items)."""
+    return [FaithfulnessVerdict(item_id=i.id, faithful=True) for i in items]
 
 
 def _raw(url, title):
@@ -33,7 +40,7 @@ def test_run_digest_enriches_and_writes_narrative(tmp_path, monkeypatch):
 
     run = runner.run_digest(settings=settings, processor=fake_processor,
                             narrator=lambda items: "What matters most today.",
-                            critic=lambda items: [])
+                            critic=_pass_critic)
 
     assert run.status == RunStatus.SUCCESS
     assert run.new == 1
