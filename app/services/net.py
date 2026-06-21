@@ -139,10 +139,13 @@ def safe_get(
                         f"response too large: {declared} bytes (> {max_bytes})"
                     )
                 body = bytearray()
-                for chunk in resp.iter_bytes():
-                    body.extend(chunk)
-                    if len(body) > max_bytes:
+                # Bound each chunk (64 KiB) so a lying/chunked/decoded (e.g. gzip)
+                # response can't hand us one giant chunk, and check the PROJECTED
+                # size before extending — we never hold more than max_bytes + 64 KiB.
+                for chunk in resp.iter_bytes(chunk_size=65536):
+                    if len(body) + len(chunk) > max_bytes:
                         raise UnsafeURLError(f"response exceeds {max_bytes} bytes")
+                    body.extend(chunk)
                 # Return a fully-read Response so callers use .text/.json/.content.
                 return httpx.Response(
                     status_code=resp.status_code,

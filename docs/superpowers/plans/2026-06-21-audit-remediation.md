@@ -738,3 +738,8 @@ Codex pre-execution review (`.claude/codex-reviews/20260621T190755Z-remediation-
 - **Task 2.4 (is_flagged backfill):** make it concrete — scan documents, batch-update those missing `is_flagged`, and emulator-test it (not just a doc note).
 - **fast_api_app guard order:** ✅ already fixed (key guard moved above GCP auth/logging).
 - **Gap — docs/ADK-GUIDE.md:** add a Phase 5 task to update it (it still documents eager `app = App(...)` and `build_pipeline(..., run_id=...)`, both removed in Phase 1).
+
+**Phase 0 gate-review findings carried to Phase 3** (`.claude/codex-reviews/20260621T192258Z-phase0-review.md`):
+- **[HIGH] ADK-native routes on `fast_api_app` are not app-key-gated.** `register_product_routes` protects `/api/*` and `/feedback` is guarded, but `get_fast_api_app(web=True)` also mounts `/run`, sessions, evals, builder routes with no API key. → Phase 3 Task 3.1/3.4: the **public product image runs `app/web_app.py` = `create_app()` (console + `/api` only, NO ADK routes, fully key-guarded)**; `fast_api_app` is the Agent Engine surface, documented as **requiring Cloud Run IAM / IAP** for the ADK routes (ADK's own auth model). Optionally add an env-gated global key middleware to `fast_api_app`.
+- **[MEDIUM] `create_app` factory bind bypass:** `uvicorn app.api.app:create_app --factory --host 0.0.0.0` with default `APP_HOST=127.0.0.1` passes the guard. → Phase 3 `app/web_app.py` MUST require `API_KEY` explicitly (don't rely on the app_host guard). Repo `run.sh` binds loopback; Docker will run `web_app`.
+- **[FIXED in Phase 0] SSRF streamed-cap strictness:** `safe_get` now uses `iter_bytes(chunk_size=65536)` + check-before-extend.
