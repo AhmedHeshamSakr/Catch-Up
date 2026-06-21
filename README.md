@@ -176,6 +176,19 @@ All settings are environment variables (or a gitignored `.env` / `app/.env`). Th
 
 See `app/core/config.py` for the complete list (rate-limit, critic, and Firestore tunables).
 
+**Console (frontend) build-time options.** The static console bakes these at
+`npm run build` — they are `NEXT_PUBLIC_*`, so they end up **in the browser bundle**.
+There is no runtime switch; you choose them per build:
+
+| Variable | Desktop (`run.sh`) | Dev (`npm run dev`) | Cloud Run image |
+|---|---|---|---|
+| `NEXT_PUBLIC_API_BASE` | `""` (same-origin) | `http://localhost:8000` | `""` (same-origin) |
+| `NEXT_PUBLIC_API_KEY` | unset (loopback, no key) | set only if the backend sets `API_KEY` | `--build-arg` = the backend `API_KEY` |
+
+The desktop launcher always builds same-origin with no key (loopback is the perimeter);
+for **dev** edit `frontend/.env.local` (copy from `.env.local.example`); for **Cloud Run**
+pass the key via `--build-arg NEXT_PUBLIC_API_KEY=...` (see [Deployment ▸ Cloud Run](#2-cloud-run--the-product-console--api)). Because the key is browser-visible, that path must run behind Cloud Run IAM / IAP.
+
 > **Secrets & key rotation.** Keys live only in a gitignored `.env` / `app/.env` — never in
 > git (CI runs **gitleaks** on every push to catch accidental leaks). If a key is ever exposed
 > or shared, rotate it: regenerate `GOOGLE_API_KEY` in
