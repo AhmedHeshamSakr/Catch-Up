@@ -1,0 +1,74 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "news_items",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "is_flagged", "order": "ASCENDING" },
+        { "fieldPath": "collected_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "news_items",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "category", "order": "ASCENDING" },
+        { "fieldPath": "is_flagged", "order": "ASCENDING" },
+        { "fieldPath": "collected_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "news_items",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "importance", "order": "ASCENDING" },
+        { "fieldPath": "is_flagged", "order": "ASCENDING" },
+        { "fieldPath": "collected_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "news_items",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "category", "order": "ASCENDING" },
+        { "fieldPath": "importance", "order": "ASCENDING" },
+        { "fieldPath": "is_flagged", "order": "ASCENDING" },
+        { "fieldPath": "collected_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "news_items",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "category", "order": "ASCENDING" },
+        { "fieldPath": "collected_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "news_items",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "importance", "order": "ASCENDING" },
+        { "fieldPath": "collected_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "news_items",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "category", "order": "ASCENDING" },
+        { "fieldPath": "importance", "order": "ASCENDING" },
+        { "fieldPath": "collected_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "news_items",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "digest_run_id", "order": "ASCENDING" },
+        { "fieldPath": "is_flagged", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

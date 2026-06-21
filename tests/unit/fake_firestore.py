@@ -48,7 +48,17 @@ class FakeQuery:
         q._limit = self._limit
         return q
 
-    def where(self, field: str, op: str, value: object) -> FakeQuery:
+    def where(
+        self, field: str | None = None, op: str | None = None,
+        value: object = None, *, filter: object = None,
+    ) -> FakeQuery:
+        if filter is not None:
+            # Duck-type a google FieldFilter (used when the [firestore] extra is
+            # installed) without importing it — the adapter's _where passes
+            # where(filter=FieldFilter(...)) only when google.cloud is present.
+            field = getattr(filter, "field_path", field)
+            op = getattr(filter, "op_string", op)
+            value = getattr(filter, "value", value)
         if op != "==":
             raise NotImplementedError(f"fake supports only '==', got {op!r}")
         q = self._clone()
@@ -112,3 +122,7 @@ class FakeFirestoreClient:
 
     def batch(self) -> FakeBatch:
         return FakeBatch()
+
+    def get_all(self, refs):
+        """Batched multi-get, mirroring google.cloud.firestore.Client.get_all."""
+        return [ref.get() for ref in refs]

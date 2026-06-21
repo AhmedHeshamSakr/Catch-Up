@@ -42,17 +42,28 @@ def _firestore_client(settings: Settings):
     return firestore.Client(project=settings.google_cloud_project or None)
 
 
+# Cache one Firestore backend (and its client) per project per process: the API
+# calls build_storage() on every request, and constructing a real
+# firestore.Client each time is expensive. SQLite stays per-call (cheap).
+_firestore_cache: dict[tuple[str, str], StorageBackend] = {}
+
+
 def build_storage(settings: Settings) -> StorageBackend:
     backend = settings.storage_backend
     if backend == "sqlite":
         store: StorageBackend = SqliteBackend(settings.sqlite_path)
-    elif backend == "firestore":
-        from app.adapters.storage.firestore_backend import FirestoreBackend
-        store = FirestoreBackend(_firestore_client(settings))
-    else:
-        raise ValueError(f"unknown storage_backend: {backend!r}")
-    store.init_schema()
-    return store
+        store.init_schema()
+        return store
+    if backend == "firestore":
+        key = ("firestore", settings.google_cloud_project)
+        cached = _firestore_cache.get(key)
+        if cached is None:
+            from app.adapters.storage.firestore_backend import FirestoreBackend
+            cached = FirestoreBackend(_firestore_client(settings))
+            cached.init_schema()
+            _firestore_cache[key] = cached
+        return cached
+    raise ValueError(f"unknown storage_backend: {backend!r}")
 
 
 def _resolve_session_db_url(settings: Settings) -> str:
