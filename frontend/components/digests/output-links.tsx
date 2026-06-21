@@ -5,14 +5,17 @@ interface OutputLinksProps {
   outputs: Record<string, string>;
 }
 
-type OutputKey = "html" | "excel" | "markdown";
+// Keys must match the backend's run.outputs (app/pipeline/agents.py RenderAgent:
+// "html" / "xlsx" / "md"). They previously read "excel"/"markdown", so only the
+// HTML badge ever rendered.
+type OutputKey = "html" | "xlsx" | "md";
 
-const OUTPUT_ORDER: OutputKey[] = ["html", "excel", "markdown"];
+const OUTPUT_ORDER: OutputKey[] = ["html", "xlsx", "md"];
 
 const OUTPUT_META: Record<OutputKey, { label: string; icon: LucideIcon }> = {
   html: { label: "HTML", icon: Globe },
-  excel: { label: "Excel", icon: Sheet },
-  markdown: { label: "Markdown", icon: FileText },
+  xlsx: { label: "Excel", icon: Sheet },
+  md: { label: "Markdown", icon: FileText },
 };
 
 export function OutputLinks({ outputs }: OutputLinksProps) {

@@ -104,11 +104,11 @@ async def test_pipeline_tree_success(tmp_path):
     assert len(saved_items) == 1
 
     from pathlib import Path
-    assert "md" in run.outputs
+    # Lock the exact output-key set: the frontend (output-links.tsx) reads these
+    # literal keys, so a rename here silently breaks the UI badges.
+    assert set(run.outputs) == {"md", "xlsx", "html"}
     assert Path(run.outputs["md"]).exists()
-    assert "xlsx" in run.outputs
     assert Path(run.outputs["xlsx"]).exists()
-    assert "html" in run.outputs
     assert Path(run.outputs["html"]).exists()
 
 
