@@ -12,20 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADK deployment entrypoint (NOT the product REST API).
+"""ADK Agent Engine deployment entrypoint (NOT the product web app).
 
 This module exposes the ADK ``App``/agent over HTTP via
-``google.adk.cli.fast_api.get_fast_api_app`` so the agent can be served on
-Agent Engine / Cloud Run with the ADK web UI, session/artifact services, and
-the ``/feedback`` endpoint. It is the surface the ADK deployment tooling
-(``agents-cli deploy``, Dockerfile) targets.
+``google.adk.cli.fast_api.get_fast_api_app`` (the ADK web UI, session/artifact
+services, ``/feedback``, and ADK-native routes such as ``/run``). It is the
+surface ``agents-cli deploy`` targets for Agent Engine / Gemini Enterprise.
 
-The canonical product REST API (``/api/...`` — dashboard, runs, news,
-sources, watchlist, resolve) lives in ``app/api/app.py`` ``create_app()`` and
-is what ``catchup serve`` runs. The two surfaces are intentionally distinct:
-this one wraps the *agent* for managed-runtime deployment; the other serves
-the *application's* HTTP API. They share no routes, so they cannot silently
-diverge.
+SECURITY — this surface is NOT fully app-key-gated. The product ``/api/*`` routes
+are key-guarded (via ``register_product_routes``) and ``/feedback`` is
+authenticated, but the ADK-native routes (``/run``, sessions, evals, builder) are
+served by ``get_fast_api_app`` without the product API key — that is ADK's model.
+Therefore this surface MUST run behind Cloud Run IAM / IAP (require
+authentication); never expose it to unauthenticated traffic.
+
+The public PRODUCT web app — Next.js console + ``/api/*`` only, with NO ADK
+routes and fully key-guarded — is ``app/web_app.py`` (``create_app()``), which the
+Dockerfile builds and Cloud Run serves. ``catchup serve`` runs the same
+``create_app()`` locally. The two surfaces share no ADK routes, so they cannot
+silently diverge.
 """
 
 import os

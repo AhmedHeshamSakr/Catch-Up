@@ -255,6 +255,43 @@ Screens:
 
 Set `SCHEDULE_ENABLED=true` + `SCHEDULE_CRON="0 7 * * *"` (+ optional `SCHEDULE_TIMEZONE`). `catchup serve` then runs the digest in-process on that cron via APScheduler, sharing the single-flight guard with manual `POST /api/runs`. In production, point Cloud Scheduler at `POST /api/runs` instead (see `docs/ADK-GUIDE.md` §6).
 
+## Deployment
+
+Three honest paths — pick one; each does exactly what it says.
+
+### 1. Local desktop (works today)
+
+`Catch-Up.app` / `./scripts/run.sh` → `create_app()` single-port on `127.0.0.1`,
+SQLite, no API key needed (loopback only). See
+[Run it as a desktop app](#run-it-as-a-desktop-app-local-single-user).
+
+### 2. Cloud Run — the product (console + API)
+
+The `Dockerfile` builds the Next.js console **and** serves it plus `/api/*` on one
+port via `app.web_app` (the product surface — **no** ADK-native routes). Required:
+set **`API_KEY`** (the image fails closed without it) and `ALLOW_ORIGINS`. Optional:
+`STORAGE_BACKEND=firestore` (the image installs the `[firestore]` extra — deploy
+`firestore.indexes.json` first via `gcloud firestore indexes composite create` /
+`firebase deploy --only firestore:indexes`) and `USE_VERTEXAI=true` for Vertex.
+Scheduled runs: point **Cloud Scheduler at `POST /api/runs`** (with the API key).
+
+```bash
+gcloud run deploy catch-up --source . \
+  --set-env-vars API_KEY=...,ALLOW_ORIGINS=https://your-console
+```
+
+### 3. ADK Agent Engine (`agents-cli deploy`)
+
+`app/fast_api_app.py` exposes the ADK web UI + ADK-native routes (`/run`, sessions,
+evals) for Agent Engine / Gemini Enterprise. Those ADK-native routes are **not**
+app-key-gated, so this surface **must run behind Cloud Run IAM / IAP**. It serves
+no Next.js console — use path 2 for the product UI.
+
+> **Firestore status:** the adapter passes the full storage contract against the
+> Firestore **emulator**, but has **not** been validated against live GCP Firestore.
+> Deploy the composite indexes (`firestore.indexes.json`) before relying on filtered
+> news queries, and run `backfill_is_flagged()` once on any pre-existing data.
+
 ## How it was built (kept for learning)
 
 This repo is intentionally transparent about its development. Alongside the code you'll find:
