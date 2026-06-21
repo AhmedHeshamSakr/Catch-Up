@@ -94,6 +94,9 @@ class FirestoreBackend(StorageBackend):
         return DigestRun.model_validate(snap.to_dict()) if snap.exists else None
 
     def list_runs(self, limit: int = 20, offset: int = 0) -> list[DigestRun]:
+        # NOTE: Firestore .offset() READS (and BILLS) every skipped doc, so deep
+        # pagination scales linearly in cost/latency. Fine at this volume; switch
+        # to cursor pagination (start_after) before high-volume production use.
         q = self._runs().order_by("started_at", _DESC).offset(offset).limit(limit)
         return [DigestRun.model_validate(s.to_dict()) for s in q.stream()]
 

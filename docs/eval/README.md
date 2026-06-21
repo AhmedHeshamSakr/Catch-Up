@@ -97,11 +97,11 @@ configured in `SAFETY_CRITICAL` in `app/pipeline/eval_score.py`.
 
 ## Reference Dataset (`tests/eval/fixtures/enrichment_reference.json`)
 
-**35 cases**, balanced across all four categories, with broad adversarial
-coverage:
+**35 cases** covering all four categories (each represented), with broad
+adversarial coverage:
 - **16 happy-path** (`golden-*`) — correct category, calibrated importance,
-  faithful summaries, fluent MSA; balanced across `ai_tech`,
-  `business_finance`, `world_geopolitics`, `gulf_mena`.
+  faithful summaries, fluent MSA; spanning `ai_tech`, `business_finance`,
+  `world_geopolitics`, `gulf_mena` (not evenly split — ai_tech is the largest).
 - **15 adversarial** (`adversarial-*`):
   - **Faithfulness negatives** — hallucinated dollar amount, fabricated facts,
     fabricated precise numbers, plus **multiple prompt-injection variants**
@@ -128,10 +128,12 @@ untrustworthy — fix the rubric/judge model before trusting enricher verdicts.
 
 ### Regression baseline (`tests/eval/baseline.json`)
 
-A committed sample EvalReport. `--check-regression` loads it, runs
-`compare(baseline, current)`, and fails the run if any dimension's mean dropped
-by more than `REGRESSION_DELTA` (0.05). `--live --update-baseline` regenerates
-it from a fresh run.
+A committed sample EvalReport. `--check-regression` loads it and runs
+`compare(baseline, current)`. **Safety-critical** dimensions (faithfulness) are
+gated on **pass_rate** — *any* drop vs baseline is a regression (the mean is only a
+secondary signal when pass_rate is unchanged), because a mean check averages a single
+hallucination away. **Soft** dimensions regress when their mean drops by more than
+`REGRESSION_DELTA` (0.05). `--live --update-baseline` regenerates it from a fresh run.
 
 ---
 

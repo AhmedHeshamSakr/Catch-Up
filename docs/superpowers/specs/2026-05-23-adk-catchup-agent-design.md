@@ -131,12 +131,15 @@ class DigestRun(BaseModel):
 
 Each collector is a strategy implementing a common `Collector` protocol
 (`collect(source: SourceConfig) -> list[RawItem]`):
-- **rss_service** — feedparser; ETag/Last-Modified caching.
-- **scrape_service** — httpx + selectolax/BeautifulSoup; per-site CSS selector config; robots-aware.
+- **rss_service** — feedparser. *(No ETag/Last-Modified conditional fetch yet.)*
+- **scrape_service** — httpx + BeautifulSoup; per-site CSS selector config. *(Not robots-aware.)*
 - **newsapi_service** — pluggable provider adapter (GNews/NewsAPI free tiers); query + category mapping.
 - **search grounding** — ADK `LlmAgent` with `google_search` for broad, current items.
 
-All network calls go through a shared **HTTP client** with timeouts, retries, and rate limiting.
+All outbound HTTP goes through the shared SSRF-safe **`safe_get`** (`app/services/net.py`):
+per-call connect/read **timeout**, **IP-pinning** + per-hop public-IP validation, and a
+streamed **response size cap**. *(No automatic retries / conditional GETs at this layer;
+rate limiting is applied at the API endpoints, not per outbound fetch.)*
 
 ## 9. Agent Pipeline (detail)
 
@@ -168,7 +171,9 @@ validated structured output.
 - Deterministic pipeline order via `SequentialAgent`; concurrency via `ParallelAgent` for collection.
 - Run lifecycle owned by `run_digest(run_id)`: create `DigestRun(running)` → run pipeline → finalize status.
 - Idempotent: dedup ensures re-runs don't duplicate; `run_id` keys outputs.
-- Cancellation/timeout budget per stage; partial results persisted progressively.
+- Cancellation/timeout budget per stage. *(Items are persisted at the Render stage,
+  not progressively per batch — a crash before Render loses the run's collected items;
+  see §13.)*
 
 ## 12. Swap-Points
 
@@ -186,8 +191,9 @@ app/adapters/storage/sqlite_backend.py | firestore_backend.py
 `STORAGE_BACKEND`. The other two "swaps" need no port — they're an env toggle or
 an HTTP call, so adding a port would be indirection without payoff:
 
-- **LLM provider** — AI Studio ↔ Vertex via the env toggle `GOOGLE_GENAI_USE_VERTEXAI`
-  (`app/llm/runtime.py:configure_genai`). No `llm.py` port.
+- **LLM provider** — AI Studio ↔ Vertex via the env toggle `USE_VERTEXAI`
+  (`app/llm/runtime.py:configure_genai`, which then sets the genai client's
+  `GOOGLE_GENAI_USE_VERTEXAI`). No `llm.py` port.
 - **Scheduler** — local APScheduler (`app/services/scheduler.py`, opt-in via
   `SCHEDULE_ENABLED`) ↔ Cloud Scheduler, which simply calls **`POST /api/runs`**.
   No scheduling adapter.
@@ -212,7 +218,9 @@ were never built — see §21.)*
   and the call retried via the loop above; a batch that still fails leaves its items `raw`
   (never crashes the run).
 - **Graceful degradation:** if LLM quota is exhausted, collection + dedup + storage still complete; processing resumes next run.
-- **Idempotent, resumable runs**; progressive persistence so a crash loses at most the in-flight batch.
+- **Idempotent re-runs** (dedup by id via `existing_ids`). *(Persistence is NOT
+  progressive: items are written at the Render stage, so a crash before Render loses the
+  run's collected items — not yet "loses at most the in-flight batch".)*
 
 ## 14. Rate Limiting & Cost Controls
 
@@ -297,7 +305,7 @@ currently a frontend view over `/api/runs` + `/api/news`, not a backend resource
 ## 19. Deployment Phasing
 
 - **v1 (free, local):** AI Studio key + SQLite + APScheduler; `adk web`/CLI + `next dev`. $0.
-- **Production:** flip `GOOGLE_GENAI_USE_VERTEXAI=TRUE`; Dockerize; deploy to **Cloud Run** (the product image serves console + `/api` same-origin); **Cloud Scheduler** → `POST /api/runs`; **Firestore** backend; Secret Manager. Lowest-cost serverless, scale-to-zero. See README "Deployment" for the three concrete paths.
+- **Production:** flip `USE_VERTEXAI=true`; Dockerize; deploy to **Cloud Run** (the product image serves console + `/api` same-origin); **Cloud Scheduler** → `POST /api/runs`; **Firestore** backend; Secret Manager. Lowest-cost serverless, scale-to-zero. See README "Deployment" for the three concrete paths.
 
 ## 20. Testing Strategy (TDD)
 

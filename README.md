@@ -103,11 +103,12 @@ NewsCatchUpPipeline (ADK SequentialAgent)
 ```
 ADK-CATCH-UP-Agent/
 ├── app/                       # Python backend — the agent + API
-│   ├── agent.py               # ADK root agent (deploy surface)
-│   ├── fast_api_app.py        # ADK FastAPI app for Agent Engine / Cloud Run
+│   ├── agent.py               # ADK root agent (lazy-built)
+│   ├── fast_api_app.py        # ADK Agent Engine surface (web UI + /api, behind IAM/IAP)
+│   ├── web_app.py             # Cloud Run product app (console + /api; fails closed)
 │   ├── cli.py                 # `catchup` CLI — `run` (a digest) and `serve` (the API)
 │   ├── core/                  # domain models + config (pydantic-settings)
-│   │   └── ports/             # storage / session interfaces (hexagonal boundary)
+│   │   └── ports/             # storage interface (the one real hexagonal port)
 │   ├── pipeline/              # ADK agents — pipeline, processing, critic, judge, digest_editor, eval
 │   ├── services/              # collectors (rss · scrape · newsapi · search · youtube), normalize,
 │   │   │                      #   watchlist, scheduler, ratelimit, SSRF-guarded net, config_store
@@ -221,6 +222,7 @@ uv run python -m app.cli serve --host 0.0.0.0 --port 8080
 | `POST /api/runs` | Trigger a new digest run (async) |
 | `GET /api/settings` | Non-secret local config (`app_host`, `app_port`, `gemini_key_set`, `shadowed_keys`) — loopback only |
 | `PUT /api/settings` | Set Gemini key (live) / port (next launch) — loopback + same-origin only |
+| `POST /feedback` | Log user feedback — **Agent Engine surface only** (`app/fast_api_app.py`); API-key-gated + rate-limited |
 | `GET /docs` | FastAPI auto-generated interactive docs (OpenAPI) |
 
 ## Web Console
@@ -301,7 +303,15 @@ no Next.js console — use path 2 for the product UI.
 > **Firestore status:** the adapter passes the full storage contract against the
 > Firestore **emulator**, but has **not** been validated against live GCP Firestore.
 > Deploy the composite indexes (`firestore.indexes.json`) before relying on filtered
-> news queries, and run `backfill_is_flagged()` once on any pre-existing data.
+> news queries. **Migration runbook** — `backfill_is_flagged()` is a one-time,
+> manually-run op (it is not wired into startup and is idempotent). Run it once on any
+> pre-`is_flagged` data, e.g.:
+> ```python
+> from app.core.config import Settings
+> from app.runner import build_storage
+> n = build_storage(Settings(storage_backend="firestore")).backfill_is_flagged()
+> print(f"backfilled {n} docs")
+> ```
 
 ## How it was built (kept for learning)
 

@@ -12,7 +12,7 @@ Cloud** by configuration, not a rewrite.
 
 Each layer talks to the next through a narrow interface, so any one can change without
 breaking the others — swap **SQLite → Firestore** (the one real storage port), flip
-**AI Studio → Vertex AI** (env toggle `GOOGLE_GENAI_USE_VERTEXAI`), or drive runs from
+**AI Studio → Vertex AI** (env toggle `USE_VERTEXAI`), or drive runs from
 **Cloud Scheduler → `POST /api/runs`** instead of in-process APScheduler.
 
 ```mermaid
