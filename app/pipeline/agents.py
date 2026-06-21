@@ -44,7 +44,7 @@ from app.pipeline.critic import (
     select_for_critique,
 )
 from app.pipeline.processing import process_items
-from app.runner import (
+from app.pipeline.wiring import (
     _collect,
     _default_critic,
     _default_narrator,
@@ -454,7 +454,6 @@ def build_pipeline(
     settings: Settings,
     storage: StorageBackend,
     *,
-    run_id: str | None = None,
     collect_fn: Callable | None = None,
     processor: Callable | None = None,
     narrator: Callable | None = None,
@@ -467,9 +466,7 @@ def build_pipeline(
         session = await runner.session_service.create_session(
             ..., state={"run_id": run_id}
         )
-
-    The build_pipeline `run_id` param is accepted for forward compatibility
-    but unused here — PipelineInitAgent reads it from ctx.session.state.
+    PipelineInitAgent reads run_id from ctx.session.state.
     """
     _collect_fn = collect_fn or _collect
     _processor = processor or _default_processor(settings)

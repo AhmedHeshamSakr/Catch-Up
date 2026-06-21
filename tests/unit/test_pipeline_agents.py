@@ -1083,15 +1083,6 @@ def test_build_pipeline_accepts_injected_dependencies(tmp_path):
     assert pipeline.name == "NewsCatchUpPipeline"
 
 
-def test_build_pipeline_run_id_param_accepted(tmp_path):
-    """build_pipeline must accept run_id kwarg without raising."""
-    settings = _settings(tmp_path)
-    storage = _storage(tmp_path)
-
-    pipeline = build_pipeline(settings, storage, run_id="explicit-run-id")
-    assert pipeline is not None
-
-
 # ---------------------------------------------------------------------------
 # SourceType -> state-key: single source of truth
 # ---------------------------------------------------------------------------

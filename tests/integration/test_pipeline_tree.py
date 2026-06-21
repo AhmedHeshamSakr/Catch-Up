@@ -86,7 +86,6 @@ async def test_pipeline_tree_success(tmp_path):
     run_id = "testrun000001"
     tree = build_pipeline(
         settings, storage,
-        run_id=run_id,
         collect_fn=fake_collect,
         processor=fake_processor,
         narrator=lambda items: "Narrative text.",
@@ -127,7 +126,6 @@ async def test_pipeline_tree_partial_on_collect_error(tmp_path):
     run_id = "testrun000002"
     tree = build_pipeline(
         settings, storage,
-        run_id=run_id,
         collect_fn=boom_collect,
         processor=lambda items: ProcessingResult(items=[]),
         narrator=lambda items: "",
