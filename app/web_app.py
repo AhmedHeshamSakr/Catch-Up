@@ -30,7 +30,10 @@ from __future__ import annotations
 from app.api.app import create_app
 from app.core.config import Settings
 
-_settings = Settings()
+# _env_file=None: read config ONLY from the runtime environment (Cloud Run /
+# Secret Manager), never a dotenv baked into the image — defense-in-depth behind
+# .dockerignore excluding app/.env from the build context.
+_settings = Settings(_env_file=None)
 if not _settings.api_key:
     raise RuntimeError(
         "app.web_app is the network-exposed Cloud Run product surface and "

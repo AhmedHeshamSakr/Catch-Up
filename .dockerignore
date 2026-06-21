@@ -1,6 +1,15 @@
 # Docker does NOT honor .gitignore — keep host build artifacts out of the build
 # context so `COPY frontend/ ./` can't clobber the image's fresh `npm ci`, and so
 # secrets/data never enter an image layer.
+#
+# Secrets FIRST: `COPY ./app ./app` would otherwise bake a host-present app/.env
+# (API keys) into an image layer. Exclude every dotenv anywhere in the context.
+.env
+.env.*
+app/.env
+app/.env.*
+**/.env
+**/.env.*
 .git/
 **/__pycache__/
 **/*.py[cod]

@@ -51,7 +51,10 @@ from app.services.ratelimit import TokenBucket
 # deployed /api/* MUST be authenticated. Checking the key first means a missing
 # key raises the intended, clear error even where GCP creds are absent (rather
 # than failing inside google.auth.default()/Cloud Logging first).
-_settings = Settings()
+# _env_file=None: read config ONLY from the runtime environment (Cloud Run /
+# Secret Manager), never a dotenv baked into the image — defense-in-depth behind
+# .dockerignore excluding app/.env from the build context.
+_settings = Settings(_env_file=None)
 if not _settings.api_key:
     raise RuntimeError(
         "app.fast_api_app is the deployed surface and requires API_KEY. "

@@ -2,12 +2,17 @@
 FastAPI app (this is how app/fast_api_app.py serves them in the deployed
 container), and create_app's CORS must honor Settings.allow_origins.
 
-Note: app/fast_api_app.py itself isn't imported here — it calls
-google.auth.default() and creates a Cloud Logging client at import time, which
-needs GCP creds. We test register_product_routes (the exact function it uses)
-and create_app instead.
+For the route-mounting tests we exercise register_product_routes (the exact
+function fast_api_app uses) and create_app, rather than importing fast_api_app
+in-process (it calls google.auth.default() + Cloud Logging at import time, which
+needs GCP creds). The fail-closed tests DO import both entrypoints, but in a
+fresh subprocess with API_KEY unset — the key guard raises before any GCP call.
 """
 from __future__ import annotations
+
+import os
+import subprocess
+import sys
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -45,3 +50,30 @@ def test_create_app_cors_uses_settings_allow_origins(tmp_path):
     assert allowed.headers.get("access-control-allow-origin") == "https://console.example"
     denied = client.get("/api/health", headers={"Origin": "https://evil.example"})
     assert denied.headers.get("access-control-allow-origin") is None
+
+
+def _import_with_cleared_key(module: str) -> subprocess.CompletedProcess:
+    """Import `module` in a FRESH interpreter with API_KEY unset — proves the
+    network-exposed entrypoints fail closed (they call Settings(_env_file=None),
+    so no dotenv can sneak a key in)."""
+    env = {k: v for k, v in os.environ.items() if k != "API_KEY"}
+    return subprocess.run(
+        [sys.executable, "-c", f"import {module}"],
+        capture_output=True, text=True, env=env,
+    )
+
+
+def test_web_app_fails_closed_without_api_key():
+    """The Cloud Run product surface must refuse to import without API_KEY."""
+    proc = _import_with_cleared_key("app.web_app")
+    assert proc.returncode != 0
+    assert "API_KEY" in proc.stderr
+
+
+def test_fast_api_app_fails_closed_without_api_key():
+    """The ADK Agent Engine surface must refuse to import without API_KEY. The
+    key guard runs BEFORE google.auth.default()/Cloud Logging, so this raises
+    without needing GCP credentials."""
+    proc = _import_with_cleared_key("app.fast_api_app")
+    assert proc.returncode != 0
+    assert "API_KEY" in proc.stderr
