@@ -129,15 +129,21 @@ export function NewsCard({ item }: NewsCardProps) {
           )}
         </div>
 
-        {/* Headline */}
-        <a
-          href={item.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="font-semibold text-link underline underline-offset-4 decoration-link/40 leading-snug transition-colors hover:decoration-link focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
-        >
-          {item.title}
-        </a>
+        {/* Headline — only render a real link for http(s) URLs. A poisoned feed
+            could carry a javascript:/data: URL; this mirrors the image_url guard
+            above and the backend HTML renderer's _safe_href. */}
+        {isHttpUrl(item.url) ? (
+          <a
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-link underline underline-offset-4 decoration-link/40 leading-snug transition-colors hover:decoration-link focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
+          >
+            {item.title}
+          </a>
+        ) : (
+          <span className="font-semibold leading-snug">{item.title}</span>
+        )}
 
         {/* Takeaway — primary text color, clamped for even, scannable cards */}
         {takeaway && (

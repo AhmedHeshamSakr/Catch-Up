@@ -19,6 +19,18 @@ import {
   watchlistSchema,
 } from "@/lib/schemas";
 
+// Production/static-export build is same-origin (one FastAPI process serves the
+// console + /api on one port); dev (`next dev`) defaults to the two-port backend.
+// An explicit NEXT_PUBLIC_API_BASE (incl. "") always wins (?? only fills undefined).
+// Resolved per call (not a module const) so a runtime-stubbed env is honored;
+// in a Next build NEXT_PUBLIC_* is inlined, so this is constant anyway.
+function resolveApiBase(): string {
+  return (
+    process.env.NEXT_PUBLIC_API_BASE ??
+    (process.env.NODE_ENV === "production" ? "" : "http://localhost:8000")
+  );
+}
+
 export class ApiError extends Error {
   /**
    * @param status HTTP status code (0 for client-side validation failures).
@@ -40,12 +52,6 @@ async function request<T>(
   init?: RequestInit,
   schema?: ZodType<T>
 ): Promise<T> {
-  // Production/static-export build is same-origin (one FastAPI process serves the
-  // console + /api on one port). Dev (`next dev`) defaults to the two-port backend.
-  // An explicit NEXT_PUBLIC_API_BASE (incl. "") always wins (?? only fills undefined).
-  const base =
-    process.env.NEXT_PUBLIC_API_BASE ??
-    (process.env.NODE_ENV === "production" ? "" : "http://localhost:8000");
   // Optional shared API key. Sent only when configured; exposed to the browser
   // (NEXT_PUBLIC_*), so use only for trusted/internal deploys — real per-user
   // auth is a separate milestone. Must match the backend's API_KEY.
@@ -55,7 +61,7 @@ async function request<T>(
   const headers = new Headers(init?.headers);
   if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (apiKey && !headers.has("X-API-Key")) headers.set("X-API-Key", apiKey);
-  const res = await fetch(base + path, { ...init, headers });
+  const res = await fetch(resolveApiBase() + path, { ...init, headers });
   if (!res.ok) {
     // Keep the raw body as debug detail but never surface it (could be HTML /
     // a stack trace) as the user-facing message.
@@ -173,3 +179,20 @@ export const api = {
     });
   },
 };
+
+/**
+ * Lightweight liveness probe for the header pill. Uses the SHARED API_BASE and
+ * sends X-API-Key (so it won't falsely report "offline" if /api/health is ever
+ * key-gated). Returns a boolean instead of throwing.
+ */
+export async function apiHealth(signal?: AbortSignal): Promise<boolean> {
+  const headers = new Headers();
+  const apiKey = process.env.NEXT_PUBLIC_API_KEY;
+  if (apiKey) headers.set("X-API-Key", apiKey);
+  try {
+    const res = await fetch(`${resolveApiBase()}/api/health`, { signal, headers });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}

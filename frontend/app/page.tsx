@@ -51,7 +51,7 @@ export default function DashboardPage() {
           <CardContent className="py-0">
             <ErrorState
               title="Couldn't load dashboard"
-              description="Is the API running on :8000?"
+              description="Is the API reachable?"
               onRetry={() => mutate()}
             />
           </CardContent>

@@ -1,14 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { apiHealth } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type Status = "online" | "offline" | "checking";
-
-// Same-origin in production (single-port desktop build); two-port backend in dev.
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE ??
-  (process.env.NODE_ENV === "production" ? "" : "http://localhost:8000");
 
 export function HealthPill() {
   const [status, setStatus] = useState<Status>("checking");
@@ -22,10 +18,11 @@ export function HealthPill() {
       controller = new AbortController();
       const ctrl = controller;
       const timer = setTimeout(() => ctrl.abort(), 5000);
-      fetch(`${API_BASE}/api/health`, { signal: ctrl.signal })
-        .then((res) => {
+      // Shared helper: same API_BASE + X-API-Key as every other call.
+      apiHealth(ctrl.signal)
+        .then((ok) => {
           clearTimeout(timer);
-          if (mounted) setStatus(res.ok ? "online" : "offline");
+          if (mounted) setStatus(ok ? "online" : "offline");
         })
         .catch(() => {
           clearTimeout(timer);

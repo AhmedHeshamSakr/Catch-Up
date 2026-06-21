@@ -19,6 +19,8 @@ export default function SettingsPage() {
   const [loadedPort, setLoadedPort] = useState<number | null>(null);
   const [shadowed, setShadowed] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -33,14 +35,14 @@ export default function SettingsPage() {
         setLoaded(true);
       })
       .catch(() => {
-        if (active) toast.error("Couldn't load settings", {
-          description: "Is the app running?",
-        });
+        // Durable error + retry, NOT a toast that auto-dismisses and leaves the
+        // page stuck on the loading skeleton forever.
+        if (active) setLoadError(true);
       });
     return () => {
       active = false;
     };
-  }, []);
+  }, [reloadKey]);
 
   const onSave = async () => {
     // Only send what actually changed: a non-empty key, and a port that differs.
@@ -108,7 +110,25 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {!loaded ? (
+      {loadError ? (
+        <Card className="max-w-xl">
+          <CardContent className="flex flex-col items-start gap-3 py-6">
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <AlertTriangle className="size-4 text-amber-500" aria-hidden="true" />
+              Couldn&apos;t load settings. Is the app reachable?
+            </p>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setLoadError(false);
+                setReloadKey((k) => k + 1);
+              }}
+            >
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      ) : !loaded ? (
         <Skeleton className="h-48 rounded-xl w-full max-w-xl" />
       ) : (
         <Card className="max-w-xl">
