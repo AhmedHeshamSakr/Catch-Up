@@ -88,7 +88,7 @@ The scheduler triggers `run_digest()`; the API also triggers it on demand and se
 ## 6. Design Principles & Patterns
 
 - **Ports & adapters where it pays (as built):** the domain (`app/core/domain.py`) is framework-free, and **storage** is a clean port with SQLite/Firestore adapters (§12). The rest is pragmatic flat modules — ADK, FastAPI, the scheduler, and the LLM provider are integrated directly rather than behind ports (a port with a single implementation is indirection without payoff). `run_digest()` is the use-case (in `app/runner.py`), not a separate `usecases/` layer.
-- **SOLID:** dependency inversion at every swap-point (interfaces in core, implementations injected).
+- **SOLID:** dependency inversion **where it pays** — storage is injected via the `StorageBackend` port (§12); the scheduler, LLM provider, and ADK are integrated directly (no port). Pragmatic, not dogmatic.
 - **Strategy pattern** for collectors (one per source type) and renderers (one per output format).
 - **Repository pattern** for storage (`StorageBackend`).
 - **Factory / DI container** to wire implementations from config (`Settings` → providers).
@@ -161,7 +161,7 @@ validated structured output.
 - **Bilingual handling:** detect language; produce EN + AR summaries; preserve original named entities.
 - **Grounding/citation:** keep source URL with every item; digest references sources.
 - **Injection defenses:** treat fetched content as untrusted data, delimited and clearly labeled; instructions never taken from article text (see §13).
-- **Eval harness** (ADK eval): golden set of items with expected category/importance to catch regressions.
+- **Eval harness** (custom enrichment harness — `scripts/eval_enrichment.py`, NOT `agents-cli eval`): golden set of items with expected category/importance to catch regressions.
 
 ## 11. Orchestration & State
 
@@ -199,25 +199,32 @@ were never built — see §21.)*
 ## 13. Fault Tolerance & Resilience
 
 - **Per-source isolation:** a failing source is logged to `source_errors`; the run continues (partial success).
-- **Retries with exponential backoff + jitter** on **LLM** calls (a custom retry loop in
-  `app/llm`, not tenacity; `llm_max_retries` / `llm_backoff_base`). *(Collector/network
-  fetches currently rely on per-call timeouts + per-source isolation, not retries.)*
+- **Retries with exponential backoff + jitter** on the structured `app/llm.run_agent_text`
+  calls (a custom loop, not tenacity; `llm_max_retries` / `llm_backoff_base`). *(Collector
+  fetches, the ADK search-grounding call, and YouTube transcript fetches are NOT on this
+  retry path — they rely on per-source isolation.)*
 - **Circuit breaker** per source — **planned, not yet implemented**; per-source isolation
   (above) already stops one failing source from failing the whole run.
-- **Timeouts** on every external call; overall stage time budget.
-- **Structured-output validation** with one retry; on failure item stays `raw` (never crashes the run).
+- **Timeouts:** a hard per-call `llm_timeout` on LLM calls and a connect/read timeout on
+  `safe_get` HTTP fetches; an OPTIONAL run-level `run_timeout` soft cap (default off).
+  *(Search-grounding and YouTube-transcript calls currently use their library defaults.)*
+- **Structured-output validation:** malformed JSON is repaired/re-parsed (`app/llm/parse.py`)
+  and the call retried via the loop above; a batch that still fails leaves its items `raw`
+  (never crashes the run).
 - **Graceful degradation:** if LLM quota is exhausted, collection + dedup + storage still complete; processing resumes next run.
 - **Idempotent, resumable runs**; progressive persistence so a crash loses at most the in-flight batch.
 
 ## 14. Rate Limiting & Cost Controls
 
 - **Token-bucket rate limiter** (`app/services/ratelimit.py`) — currently guards the
-  expensive API endpoints (`POST /runs`, `/sources/resolve`); per-source / per-host buckets
-  are future work.
+  expensive API endpoints (`POST /api/runs`, `/api/sources/resolve`); per-source / per-host
+  buckets are future work.
 - LLM runs **only on new (deduped) items**, **batched**, on **Gemini Flash**.
 - **Importance threshold** filters items before the (more expensive) narrative step.
-- **Caching:** RSS conditional GETs; grounding results cached within a run; HTTP response cache.
-- **Quota-aware scheduling** respects free-tier RPM/RPD; backoff on 429.
+- **No re-work:** `existing_ids` skips already-stored URLs before any LLM call, so re-runs
+  don't re-enrich. *(RSS conditional GETs / grounding cache / HTTP response cache are not implemented.)*
+- **Backoff on quota/transient errors** via the LLM retry loop. *(There is no quota-aware
+  scheduler that pre-emptively respects RPM/RPD — runs back off and degrade gracefully.)*
 
 ## 15. Security & Multi-Tenancy
 
@@ -297,7 +304,7 @@ currently a frontend view over `/api/runs` + `/api/news`, not a backend resource
 - Unit tests per service with fixtures (sample feeds/HTML/API JSON).
 - **Storage contract tests** run against SQLite + Firestore emulator (same suite).
 - Pipeline agents tested with mocked LLM responses; schema-validation tests.
-- **ADK eval set** for processing quality (category/importance golden data).
+- **Custom enrichment eval** for processing quality (category/importance golden data via `scripts/eval_enrichment.py`).
 - API integration tests; frontend component tests; E2E happy path (run → digest → outputs).
 - CI gates: lint (ruff), type-check (mypy), tests, coverage threshold.
 
@@ -314,12 +321,14 @@ section originally sketched):
 │   ├── web_app.py               # Cloud Run product app = create_app()
 │   ├── cli.py                   # `catchup` CLI: run / serve
 │   ├── runner.py                # run_digest() job + build_storage()
+│   ├── run_trigger.py           # shared single-flight run starter (API + scheduler)
 │   ├── core/                    # domain.py, config.py, env_store.py, ports/storage.py
 │   ├── pipeline/                # agents.py (ADK tree), wiring.py, processing, critic,
 │   │                            #   judge, digest_editor, eval_score, eval_schema
 │   ├── llm/                     # Gemini runtime + structured-output schema/parse
 │   ├── services/               # rss, scrape, newsapi, search, youtube, normalize,
-│   │   │                        #   watchlist, scheduler, ratelimit, net, config_store
+│   │   │                        #   watchlist, scheduler, ratelimit, net, config_store,
+│   │   │                        #   feed_discovery, youtube_resolve
 │   │   └── render/             # excel, html, markdown
 │   ├── adapters/storage/       # sqlite_backend.py, firestore_backend.py
 │   ├── api/                    # FastAPI product API + static console mount

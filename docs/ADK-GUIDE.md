@@ -53,7 +53,7 @@ NewsCatchUpPipeline               (SequentialAgent)              app/pipeline/ag
 
 ## 3. The LLM agents
 
-Structured-output agents use `Agent(model=settings.llm_model, instruction=<prompt>, output_schema=<Pydantic>, output_key=...)`, run via `llm.runtime.run_agent_text`, and are validated with `Model.model_validate_json`. `search_collector` is the tool-only exception (`tools=[google_search]`, no `output_schema`).
+Structured-output agents use `Agent(model=settings.llm_model, instruction=<prompt>, output_schema=<Pydantic>)`, run via `llm.runtime.run_agent_text`, and are validated by parsing the returned text with `Model.model_validate_json` (`output_key` was removed — the pipeline reads the agent's text output, not session state). `search_collector` is the tool-only exception (`tools=[google_search]`, no `output_schema`).
 
 | Agent | File | Prompt | `output_schema` | Role |
 |---|---|---|---|---|
@@ -141,7 +141,7 @@ class NormalizeDedupAgent(BaseAgent):
 ```
 
 ### d) Exposure to `adk run` / `adk web`
-`app/agent.py` exports `app = App(root_agent=build_pipeline(...), name="app")`. The ADK loader (and `agents-cli-manifest.yaml`'s `agent_directory: "app"`) resolves the `app` attribute first, so `adk run app` / `adk web` drive the **real** `NewsCatchUpPipeline`. (`App.name` stays `"app"`; the tree's root agent is named `NewsCatchUpPipeline`.)
+`app/agent.py` builds `app = App(root_agent=build_pipeline(...), name="app")` **lazily** via module `__getattr__` (so importing the package does no I/O — built once, cached under a lock). The ADK loader (and `agents-cli-manifest.yaml`'s `agent_directory: "app"`) resolves the `app` attribute first, so `adk run app` / `adk web` drive the **real** `NewsCatchUpPipeline`. (`App.name` stays `"app"`; the tree's root agent is named `NewsCatchUpPipeline`.)
 
 ---
 
