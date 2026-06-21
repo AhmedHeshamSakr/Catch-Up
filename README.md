@@ -41,12 +41,15 @@ validated against live GCP**. Design is approved — see
 - **Single-port desktop app** — one process serves the built console *and* the API, wrapped in
   a double-clickable macOS `.app` (chromeless window).
 - **Scheduling** — in-process cron via APScheduler, or point Cloud Scheduler at the API.
-- **Config-driven cloud scaling** — hexagonal ports let you swap **SQLite → Firestore**,
-  **AI Studio → Vertex AI**, and **local → Cloud Run** by environment variable.
+- **Config-driven cloud scaling** — a clean **storage port** swaps **SQLite → Firestore**
+  via `STORAGE_BACKEND`; **AI Studio → Vertex AI** is an env toggle (`USE_VERTEXAI`); and the
+  same pipeline deploys to **Cloud Run** (a separate product image) — no rewrite. (Storage is
+  the one real port; the rest are integrated directly — see [ARCHITECTURE.md](ARCHITECTURE.md).)
 - **Runs free locally** — collection/dedup/storage work with no key; the **test suite runs
   fully offline** (no key or quota needed).
-- **Security-minded** — localhost-only settings surface, optional shared `API_KEY`, per-source
-  rate limiting, and a single SSRF chokepoint for all outbound fetches.
+- **Security-minded** — localhost-only settings surface, optional shared `API_KEY`, rate
+  limiting on the expensive API endpoints, and a single SSRF chokepoint (IP-pinned, size-capped)
+  for all outbound fetches.
 
 ## Run it as a desktop app (local, single-user)
 
