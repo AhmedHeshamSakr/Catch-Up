@@ -54,7 +54,6 @@ def build_processing_agent(model: str, temperature: float = 0.0) -> Agent:
         model=model,
         instruction=_PROMPT,
         output_schema=ProcessingResult,
-        output_key="processing_result",
         generate_content_config=types.GenerateContentConfig(temperature=temperature),
     )
 
@@ -97,7 +96,6 @@ def build_reprocess_agent(model: str, temperature: float = 0.0) -> Agent:
         model=model,
         instruction=_REPROCESS_PROMPT,
         output_schema=ProcessingResult,
-        output_key="processing_result",
         generate_content_config=types.GenerateContentConfig(temperature=temperature),
     )
 

@@ -43,7 +43,6 @@ def build_critic_agent(model: str, temperature: float = 0.0) -> Agent:
         model=model,
         instruction=_CRITIC_PROMPT,
         output_schema=FaithfulnessVerdicts,
-        output_key="verdicts",
         generate_content_config=types.GenerateContentConfig(temperature=temperature),
     )
 

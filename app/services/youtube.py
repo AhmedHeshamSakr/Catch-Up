@@ -198,7 +198,6 @@ def build_youtube_summary_agent(model: str):
         model=model,
         instruction=_PROMPT,
         output_schema=DigestNarrative,
-        output_key="youtube_summary",
     )
 
 
