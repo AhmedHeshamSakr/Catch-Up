@@ -175,6 +175,12 @@ All settings are environment variables (or a gitignored `.env` / `app/.env`). Th
 
 See `app/core/config.py` for the complete list (rate-limit, critic, and Firestore tunables).
 
+> **Secrets & key rotation.** Keys live only in a gitignored `.env` / `app/.env` — never in
+> git (CI runs **gitleaks** on every push to catch accidental leaks). If a key is ever exposed
+> or shared, rotate it: regenerate `GOOGLE_API_KEY` in
+> [Google AI Studio](https://aistudio.google.com/apikey) and `GNEWS_API_KEY` in your GNews
+> dashboard, then update your local `.env`.
+
 ## Quality & faithfulness
 
 Two LLM-as-judge safeguards protect summary quality (both build/test offline; live runs need `GOOGLE_API_KEY`):
