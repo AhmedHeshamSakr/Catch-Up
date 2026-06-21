@@ -45,8 +45,12 @@ def test_agent_app_is_buildable_on_access(tmp_path):
     repo = Path(__file__).resolve().parents[2]
     code = (
         "import app.agent\n"
-        "assert app.agent.root_agent is not None\n"
+        # Access root_agent FIRST, then app: must be the SAME App (built once),
+        # so app.root_agent IS the root_agent obtained earlier.
+        "ra = app.agent.root_agent\n"
+        "assert ra is not None\n"
         "assert app.agent.app.name == 'app'\n"
+        "assert app.agent.app.root_agent is ra\n"
         "print('built-ok')\n"
     )
     env = {

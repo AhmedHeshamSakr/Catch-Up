@@ -14,11 +14,15 @@
 # limitations under the License.
 from __future__ import annotations
 
+import threading
+
 from app.core.config import Settings
+
+_build_lock = threading.Lock()
 
 
 def build_app():
-    """Construct the ADK App lazily (NO I/O at import time).
+    """Construct the ADK App lazily (no DB creation / disk writes at import time).
 
     Building the pipeline calls build_storage(), which opens/migrates the SQLite
     file. Doing that at import would create data/catchup.db merely by importing
@@ -37,8 +41,13 @@ def build_app():
 
 def __getattr__(name: str):
     if name in ("app", "root_agent"):
-        built = build_app()
-        value = built if name == "app" else built.root_agent
-        globals()[name] = value  # cache: build the App at most once
-        return value
+        # Build ONCE and cache BOTH names from the same App, so app.root_agent IS
+        # root_agent (ADK probes both via hasattr). Locked to avoid a double-build
+        # race on concurrent first access.
+        with _build_lock:
+            if "app" not in globals():
+                built = build_app()
+                globals()["app"] = built
+                globals()["root_agent"] = built.root_agent
+        return globals()[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
