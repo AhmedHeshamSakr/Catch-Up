@@ -31,14 +31,15 @@ diverge.
 import os
 
 import google.auth
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from google.adk.cli.fast_api import get_fast_api_app
 from google.cloud import logging as google_cloud_logging
 
-from app.api.app import register_product_routes
+from app.api.app import _rate_limiter, _require_api_key, register_product_routes
 from app.app_utils.telemetry import setup_telemetry
 from app.app_utils.typing import Feedback
 from app.core.config import Settings
+from app.services.ratelimit import TokenBucket
 
 setup_telemetry()
 _, project_id = google.auth.default()
@@ -84,9 +85,25 @@ app.description = "API for interacting with the Agent catch-up"
 register_product_routes(app, _settings)
 
 
-@app.post("/feedback")
+# Feedback writes to Cloud Logging, so it must be authenticated + rate-limited on
+# this network-exposed surface (unauthenticated, it's a log-injection / cost vector).
+# Reuses the same tested helpers as the product routes; api_key is guaranteed set
+# (the import-time guard above fails closed when it isn't).
+_feedback_bucket = TokenBucket(
+    rate_per_sec=_settings.rate_limit_refill_per_sec,
+    capacity=_settings.rate_limit_burst,
+)
+
+
+@app.post(
+    "/feedback",
+    dependencies=[
+        Depends(_require_api_key(_settings)),
+        Depends(_rate_limiter(_feedback_bucket)),
+    ],
+)
 def collect_feedback(feedback: Feedback) -> dict[str, str]:
-    """Collect and log feedback.
+    """Collect and log feedback (authenticated + rate-limited).
 
     Args:
         feedback: The feedback data to log
