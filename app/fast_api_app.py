@@ -41,6 +41,18 @@ from app.app_utils.typing import Feedback
 from app.core.config import Settings
 from app.services.ratelimit import TokenBucket
 
+# Fail closed BEFORE any GCP side effect: this module is the network-exposed
+# deploy surface (Agent Engine / Cloud Run), always bound to 0.0.0.0, so a
+# deployed /api/* MUST be authenticated. Checking the key first means a missing
+# key raises the intended, clear error even where GCP creds are absent (rather
+# than failing inside google.auth.default()/Cloud Logging first).
+_settings = Settings()
+if not _settings.api_key:
+    raise RuntimeError(
+        "app.fast_api_app is the deployed surface and requires API_KEY. "
+        "Set the API_KEY env var (Secret Manager in prod)."
+    )
+
 setup_telemetry()
 _, project_id = google.auth.default()
 logging_client = google_cloud_logging.Client()
@@ -48,14 +60,6 @@ logger = logging_client.logger(__name__)
 # Single source of truth for CORS origins: Settings.allow_origins (ALLOW_ORIGINS
 # env, comma-split, trimmed). Passed to get_fast_api_app so ADK's CORS AND its
 # origin-check middleware both honor the same allowlist as the product API.
-_settings = Settings()
-# This module is the network-exposed deploy surface (Agent Engine / Cloud Run),
-# always bound to 0.0.0.0. Fail closed: a deployed /api/* MUST be authenticated.
-if not _settings.api_key:
-    raise RuntimeError(
-        "app.fast_api_app is the deployed surface and requires API_KEY. "
-        "Set the API_KEY env var (Secret Manager in prod)."
-    )
 allow_origins = _settings.allow_origins or None
 
 # Artifact bucket for ADK (created by Terraform, passed via env var)
