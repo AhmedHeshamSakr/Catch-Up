@@ -82,11 +82,11 @@ The scheduler triggers `run_digest()`; the API also triggers it on demand and se
 | Scheduler | APScheduler / local cron | Cloud Scheduler → HTTP trigger |
 | Frontend | Next.js + shadcn/ui + Tailwind | same (Vercel or Cloud Run) |
 | Excel/HTML/MD | openpyxl, Jinja2, markdown | same |
-| Resilience | tenacity (retry), pyrate-limiter/token bucket | same |
+| Resilience | custom LLM retry/backoff (`app/llm`) + `TokenBucket` rate limiter | same |
 
 ## 6. Design Principles & Patterns
 
-- **Clean / Hexagonal architecture (ports & adapters):** domain + use-cases independent of frameworks; ADK, FastAPI, storage, scheduler, LLM provider are adapters at the edges.
+- **Ports & adapters where it pays (as built):** the domain (`app/core/domain.py`) is framework-free, and **storage** is a clean port with SQLite/Firestore adapters (§12). The rest is pragmatic flat modules — ADK, FastAPI, the scheduler, and the LLM provider are integrated directly rather than behind ports (a port with a single implementation is indirection without payoff). `run_digest()` is the use-case (in `app/runner.py`), not a separate `usecases/` layer.
 - **SOLID:** dependency inversion at every swap-point (interfaces in core, implementations injected).
 - **Strategy pattern** for collectors (one per source type) and renderers (one per output format).
 - **Repository pattern** for storage (`StorageBackend`).
@@ -171,24 +171,40 @@ validated structured output.
 - Idempotent: dedup ensures re-runs don't duplicate; `run_id` keys outputs.
 - Cancellation/timeout budget per stage; partial results persisted progressively.
 
-## 12. Swap-Points (Ports & Adapters)
+## 12. Swap-Points
+
+The one place that earns a port/adapter split — two real implementations — is
+**storage**:
 
 ```
-core/ports/
-├── storage.py     # StorageBackend (ABC): save_items, get_items, exists, create_run, finalize_run...
-├── scheduler.py   # Scheduler (ABC): schedule(job, cron), trigger_now()
-└── llm.py         # provider selection is via ADK env toggle (GOOGLE_GENAI_USE_VERTEXAI)
-adapters/
-├── storage/sqlite_backend.py | firestore_backend.py
-└── scheduling/local_scheduler.py | cloud_scheduler.py
+app/core/ports/storage.py                # StorageBackend (ABC): existing_ids, save_items,
+                                         #   get_items_for_run, create_run, finalize_run,
+                                         #   get_run, list_runs, list_news
+app/adapters/storage/sqlite_backend.py | firestore_backend.py
 ```
-A `Settings`-driven factory wires the concrete adapters. **No business logic differs between v1 and prod.**
+
+`build_storage(settings)` (in `app/runner.py`) wires the concrete backend from
+`STORAGE_BACKEND`. The other two "swaps" need no port — they're an env toggle or
+an HTTP call, so adding a port would be indirection without payoff:
+
+- **LLM provider** — AI Studio ↔ Vertex via the env toggle `GOOGLE_GENAI_USE_VERTEXAI`
+  (`app/llm/runtime.py:configure_genai`). No `llm.py` port.
+- **Scheduler** — local APScheduler (`app/services/scheduler.py`, opt-in via
+  `SCHEDULE_ENABLED`) ↔ Cloud Scheduler, which simply calls **`POST /api/runs`**.
+  No scheduling adapter.
+
+**No business logic differs between v1 and prod.** *(The earlier draft of this
+section listed `scheduler.py`/`llm.py` ports and a `scheduling/` adapter; those
+were never built — see §21.)*
 
 ## 13. Fault Tolerance & Resilience
 
 - **Per-source isolation:** a failing source is logged to `source_errors`; the run continues (partial success).
-- **Retries with exponential backoff + jitter** (tenacity) on network/API/LLM transient errors.
-- **Circuit breaker** per source to skip repeatedly-failing sources within a run.
+- **Retries with exponential backoff + jitter** on **LLM** calls (a custom retry loop in
+  `app/llm`, not tenacity; `llm_max_retries` / `llm_backoff_base`). *(Collector/network
+  fetches currently rely on per-call timeouts + per-source isolation, not retries.)*
+- **Circuit breaker** per source — **planned, not yet implemented**; per-source isolation
+  (above) already stops one failing source from failing the whole run.
 - **Timeouts** on every external call; overall stage time budget.
 - **Structured-output validation** with one retry; on failure item stays `raw` (never crashes the run).
 - **Graceful degradation:** if LLM quota is exhausted, collection + dedup + storage still complete; processing resumes next run.
@@ -196,7 +212,9 @@ A `Settings`-driven factory wires the concrete adapters. **No business logic dif
 
 ## 14. Rate Limiting & Cost Controls
 
-- **Token-bucket rate limiters** per external dependency (per news API, per LLM RPM, per host for scraping).
+- **Token-bucket rate limiter** (`app/services/ratelimit.py`) — currently guards the
+  expensive API endpoints (`POST /runs`, `/sources/resolve`); per-source / per-host buckets
+  are future work.
 - LLM runs **only on new (deduped) items**, **batched**, on **Gemini Flash**.
 - **Importance threshold** filters items before the (more expensive) narrative step.
 - **Caching:** RSS conditional GETs; grounding results cached within a run; HTTP response cache.
@@ -272,30 +290,40 @@ GET  /api/news  (search/filter)
 
 ## 21. Project Structure
 
+As built — a flat `app/` package (not the deeper `backend/catchup/` tree this
+section originally sketched):
+
 ```
 .
-├── backend/
-│   ├── catchup/
-│   │   ├── agent.py                 # root_agent = NewsCatchUpPipeline (ADK entrypoint)
-│   │   ├── pipeline/                # collection, normalize, processing, digest_editor, render
-│   │   ├── services/                # rss, scrape, newsapi, render/{excel,html,markdown}, http
-│   │   ├── core/
-│   │   │   ├── domain/              # schema.py (NewsItem, DigestRun, enums)
-│   │   │   ├── ports/               # storage.py, scheduler.py
-│   │   │   ├── usecases/            # run_digest, source mgmt
-│   │   │   └── config.py            # Settings + DI factory
-│   │   ├── adapters/storage/        # sqlite_backend, firestore_backend
-│   │   ├── adapters/scheduling/     # local_scheduler, cloud_scheduler
-│   │   ├── prompts/                 # versioned prompt files
-│   │   ├── api/                     # FastAPI app + routers
-│   │   └── runner.py                # run_digest() job
-│   ├── config/                      # app.yaml, sources.yaml, watchlist.yaml
-│   ├── tests/
-│   ├── pyproject.toml  .env.example  Dockerfile
-├── frontend/                        # Next.js + shadcn/ui + Tailwind console
-├── docs/
+├── app/
+│   ├── agent.py                 # ADK root agent (lazy-built)
+│   ├── fast_api_app.py          # ADK Agent Engine surface (web UI + /api)
+│   ├── web_app.py               # Cloud Run product app = create_app()
+│   ├── cli.py                   # `catchup` CLI: run / serve
+│   ├── runner.py                # run_digest() job + build_storage()
+│   ├── core/                    # domain.py, config.py, env_store.py, ports/storage.py
+│   ├── pipeline/                # agents.py (ADK tree), wiring.py, processing, critic,
+│   │                            #   judge, digest_editor, eval_score, eval_schema
+│   ├── llm/                     # Gemini runtime + structured-output schema/parse
+│   ├── services/               # rss, scrape, newsapi, search, youtube, normalize,
+│   │   │                        #   watchlist, scheduler, ratelimit, net, config_store
+│   │   └── render/             # excel, html, markdown
+│   ├── adapters/storage/       # sqlite_backend.py, firestore_backend.py
+│   ├── api/                    # FastAPI product API + static console mount
+│   ├── app_utils/             # telemetry, typing
+│   └── prompts/               # versioned prompt files (*.md)
+├── frontend/                   # Next.js + shadcn/ui + Tailwind console
+├── config/                     # sources.yaml, watchlist.yaml
+├── tests/                      # unit, integration, eval
+├── docs/                       # ADK-GUIDE, eval, specs, plans, BUILD-LOG
+├── Dockerfile  firestore.indexes.json  pyproject.toml  agents-cli-manifest.yaml
 └── README.md
 ```
+
+> There is no `core/usecases/` or `core/domain/` package, and no
+> `adapters/scheduling/` — `run_digest()` (the use-case) lives in `runner.py`,
+> the domain is a single `core/domain.py` module, and only storage needed a
+> port/adapter split (§12). The flat layout proved sufficient.
 
 ## 22. Milestones
 
