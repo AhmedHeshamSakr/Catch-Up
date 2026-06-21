@@ -33,8 +33,6 @@ export const entitySchema = z.object({
 
 export const newsItemSchema = z.object({
   id: z.string(),
-  org_id: z.string(),
-  user_id: z.string(),
   source_id: z.string(),
   source_type: sourceTypeSchema,
   source_name: z.string(),
@@ -57,7 +55,6 @@ export const newsItemSchema = z.object({
 
 export const digestRunSchema = z.object({
   run_id: z.string(),
-  org_id: z.string(),
   started_at: z.string(),
   finished_at: z.string().nullable(),
   status: runStatusSchema,

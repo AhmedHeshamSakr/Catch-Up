@@ -6,9 +6,6 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field, field_validator
 
-DEFAULT_ORG = "default"
-DEFAULT_USER = "default"
-
 
 class SourceType(StrEnum):
     RSS = "rss"
@@ -131,8 +128,6 @@ class RawItem(BaseModel):
 
 class NewsItem(BaseModel):
     id: str
-    org_id: str = DEFAULT_ORG
-    user_id: str = DEFAULT_USER
     source_id: str
     source_type: SourceType
     source_name: str
@@ -171,7 +166,6 @@ class NewsItem(BaseModel):
 
 class DigestRun(BaseModel):
     run_id: str
-    org_id: str = DEFAULT_ORG
     started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     finished_at: datetime | None = None
     status: RunStatus = RunStatus.RUNNING

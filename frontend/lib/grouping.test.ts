@@ -9,8 +9,6 @@ function makeItem(
 ): NewsItem {
   return {
     id,
-    org_id: "o",
-    user_id: "u",
     source_id: "s",
     source_type: "rss",
     source_name: "Source",

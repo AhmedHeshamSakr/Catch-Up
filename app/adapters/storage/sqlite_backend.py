@@ -43,12 +43,12 @@ class SqliteBackend(StorageBackend):
         with self._conn() as conn:
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS news_items ("
-                "id TEXT PRIMARY KEY, run_id TEXT, org_id TEXT, category TEXT, "
+                "id TEXT PRIMARY KEY, run_id TEXT, category TEXT, "
                 "importance TEXT, collected_at TEXT, status TEXT, data TEXT NOT NULL)"
             )
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS digest_runs ("
-                "run_id TEXT PRIMARY KEY, org_id TEXT, status TEXT, "
+                "run_id TEXT PRIMARY KEY, status TEXT, "
                 "started_at TEXT, data TEXT NOT NULL)"
             )
             # Migrate older databases that predate the query columns.
@@ -76,11 +76,11 @@ class SqliteBackend(StorageBackend):
         with self._conn() as conn:
             conn.executemany(
                 "INSERT OR REPLACE INTO news_items "
-                "(id, run_id, org_id, category, importance, collected_at, status, data) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "(id, run_id, category, importance, collected_at, status, data) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
-                        i.id, i.digest_run_id, i.org_id,
+                        i.id, i.digest_run_id,
                         i.category.value if i.category else None,
                         i.importance.value if i.importance else None,
                         i.collected_at.isoformat(),
@@ -106,8 +106,8 @@ class SqliteBackend(StorageBackend):
         with self._conn() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO digest_runs "
-                "(run_id, org_id, status, started_at, data) VALUES (?, ?, ?, ?, ?)",
-                (run.run_id, run.org_id, run.status.value, run.started_at.isoformat(),
+                "(run_id, status, started_at, data) VALUES (?, ?, ?, ?)",
+                (run.run_id, run.status.value, run.started_at.isoformat(),
                  run.model_dump_json()),
             )
 
