@@ -78,6 +78,26 @@ def _require_local_write(request: Request) -> None:
         raise HTTPException(status_code=403, detail="settings are local-only")
 
 
+def require_api_key_for_nonlocal(settings: Settings, bind_host: str) -> None:
+    """Fail closed: refuse to serve a network-exposed API without an API key.
+
+    Loopback binds (127.0.0.1 / ::1 / localhost) stay open for local/dev use; any
+    other bind (0.0.0.0, a LAN/public IP) MUST set ``api_key`` or we raise. Callers
+    pass the ACTUAL bind host: ``create_app`` passes ``settings.app_host`` (the
+    desktop/factory bind); the CLI ``serve`` passes its ``--host`` arg; the deployed
+    entrypoints (fast_api_app / web_app) require a key unconditionally.
+    """
+    host = _hostname(bind_host) or bind_host
+    if host in _LOOPBACK_HOSTS or bind_host in _LOOPBACK_IPS:
+        return
+    if not settings.api_key:
+        raise RuntimeError(
+            "Refusing to start: the API is bound to a non-loopback address "
+            f"({bind_host!r}) without API_KEY set. Set API_KEY for any "
+            "network-exposed deployment."
+        )
+
+
 class SettingsPatch(BaseModel):
     """Body for PUT /api/settings. Both fields optional (patch semantics)."""
 
@@ -322,6 +342,9 @@ def create_app(
 ) -> FastAPI:
     """Standalone product API (run by ``catchup serve``)."""
     settings = settings or Settings()
+
+    # Fail closed if the configured bind is network-exposed without an API key.
+    require_api_key_for_nonlocal(settings, settings.app_host)
 
     # A stray root .env silently overrides app/.env (pydantic env_file precedence),
     # which would make UI/Settings key-saves to app/.env look ignored. Warn loudly.

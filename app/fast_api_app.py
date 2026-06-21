@@ -48,6 +48,13 @@ logger = logging_client.logger(__name__)
 # env, comma-split, trimmed). Passed to get_fast_api_app so ADK's CORS AND its
 # origin-check middleware both honor the same allowlist as the product API.
 _settings = Settings()
+# This module is the network-exposed deploy surface (Agent Engine / Cloud Run),
+# always bound to 0.0.0.0. Fail closed: a deployed /api/* MUST be authenticated.
+if not _settings.api_key:
+    raise RuntimeError(
+        "app.fast_api_app is the deployed surface and requires API_KEY. "
+        "Set the API_KEY env var (Secret Manager in prod)."
+    )
 allow_origins = _settings.allow_origins or None
 
 # Artifact bucket for ADK (created by Terraform, passed via env var)

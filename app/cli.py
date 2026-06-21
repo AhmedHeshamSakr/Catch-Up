@@ -28,9 +28,13 @@ def main() -> None:
     elif args.command == "serve":
         import uvicorn
 
-        from app.api.app import create_app
+        from app.api.app import create_app, require_api_key_for_nonlocal
+        from app.core.config import Settings
 
-        uvicorn.run(create_app(), host=args.host, port=args.port)
+        settings = Settings()
+        # Fail closed: --host 0.0.0.0 (or any non-loopback) needs API_KEY set.
+        require_api_key_for_nonlocal(settings, args.host)
+        uvicorn.run(create_app(settings), host=args.host, port=args.port)
     else:
         parser.print_help()
 
