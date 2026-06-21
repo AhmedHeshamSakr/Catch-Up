@@ -24,9 +24,9 @@
     "severity": "high",
     "category": "security",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/api/app.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/fast_api_app.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/core/config.py"
+      "app/api/app.py",
+      "app/fast_api_app.py",
+      "app/core/config.py"
     ],
     "evidence": "config.py:138 api_key defaults None (auth off). app.py:104-105 returns no-op when unset. fast_api_app.py:50,77 registers product routes with no api_key enforcement, so the Cloud Run container (Dockerfile uvicorn app.fast_api_app:app on 0.0.0.0) serves dashboard, runs GET+POST trigger, news, sources GET+PUT, watchlist GET+PUT with zero auth unless API_KEY is set. Warning log app.py:151-155, nothing fails closed.",
     "impact": "Deployed without API_KEY (default; nothing sets it), the API is world read+write: overwrite the source list via PUT sources (injecting arbitrary URLs the server then fetches as a proxy/amplifier even within the SSRF allowlist), overwrite watchlist, trigger runs, read all news.",
@@ -41,8 +41,8 @@
     "severity": "high",
     "category": "deployment",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/agents-cli-manifest.yaml",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/frontend/package.json"
+      "agents-cli-manifest.yaml",
+      "frontend/package.json"
     ],
     "evidence": "`ls .github .gitlab .circleci` -> all absent ('NO .github DIR'); no workflow yml/yaml found anywhere outside frontend/node_modules. The manifest's cicd_runner is 'skip'. So the otherwise-excellent suite (verified: 414 passed/1 skipped in 3.2s backend; 82 passed frontend) only ever runs when a human types the command. The eval regression gate (scripts/eval_enrichment.py check_regression, tested in test_eval_harness.py) and the committed baseline.json are pure documentation with no enforcement.",
     "impact": "A green test suite is only ever a local, manual assertion. Any push/merge can silently ship a regression \u2014 a broken Zod schema, a drifted prompt-vs-schema contract, a storage contract break \u2014 because nothing gates it. For a public repo this also means external contributors' PRs are untested at the door. The investment in 497 real tests is under-leveraged: the safety net exists but is never deployed.",
@@ -126,9 +126,9 @@
     "severity": "medium",
     "category": "incompleteness",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/adapters/storage/firestore_backend.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/tests/integration/test_firestore_emulator.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/tests/unit/fake_firestore.py"
+      "app/adapters/storage/firestore_backend.py",
+      "tests/integration/test_firestore_emulator.py",
+      "tests/unit/fake_firestore.py"
     ],
     "evidence": "firestore_backend.py:65,67,90-95 build queries with positional where(field, op, value) and order_by('collected_at', 'DESCENDING'); list_news combines an equality filter (category/importance/is_flagged) WITH order_by on a different field \u2014 real Firestore requires a composite index for this and returns FAILED_PRECONDITION (HTTP 400) without one. The adapter's own docstring (lines 5-11) admits positional where() is deprecated and must be swapped to FieldFilter before deploy. fake_firestore.py:1-4 states explicitly it has 'no real query semantics (no composite-index or inequality-filter constraints), so it validates the adapter's logic, not the backing store itself.' The only real-store gate, test_firestore_emulator.py:23-29, is pytestmark.skip(...) and its single test body raises AssertionError('implement against the emulator before deploy'). pyproject.toml:42-43 gates google-cloud-firestore behind an optional [firestore] extra that is not installed in the test env (test_build_storage.py:30-37 skips when it IS installed).",
     "impact": "The headline 'swap SQLite -> Firestore by config only, no rewrite' promise (spec swap-points, ARCHITECTURE.md, README prod path) is undelivered. Setting STORAGE_BACKEND=firestore in production would construct a client, pass all offline tests, then throw a missing-index error the first time the dashboard/news/digests pages issue a filtered+ordered query \u2014 i.e. the entire product UI would be broken in prod. This is a core contributor to the user's 'agents and gcp webapp and sqlite all scattered' feeling: the prose advertises a Firestore prod path that does not actually work.",
@@ -143,8 +143,8 @@
     "severity": "medium",
     "category": "data-integrity",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/adapters/storage/firestore_backend.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/adapters/storage/sqlite_backend.py"
+      "app/adapters/storage/firestore_backend.py",
+      "app/adapters/storage/sqlite_backend.py"
     ],
     "evidence": "firestore_backend.py:40-44: existing_ids returns '{i for i in ids if col.document(i).get().exists}' \u2014 one synchronous .get() round-trip per candidate id. The SQLite equivalent (sqlite_backend.py:65-73) does a SINGLE batched 'SELECT id ... WHERE id IN (placeholders)'. The dedup stage (NormalizeDedup) calls existing_ids with the full batch of newly collected items, so on Firestore a single digest run collecting K items issues K sequential network gets.",
     "impact": "The two adapters have the same contract but wildly different cost/latency profiles for the hot dedup path. On Firestore this is O(N) network round-trips per run (slow, and billed per read), versus O(1) queries on SQLite. Functionally correct on the fake, operationally poor on real Firestore \u2014 another reason the swap is not production-ready as written.",
@@ -159,9 +159,9 @@
     "severity": "medium",
     "category": "deployment",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/fast_api_app.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/Dockerfile",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/runner.py"
+      "app/fast_api_app.py",
+      "Dockerfile",
+      "app/runner.py"
     ],
     "evidence": "The Dockerfile CMD (line 39) runs 'uvicorn app.fast_api_app:app'. fast_api_app.py:57-58 hardcodes 'session_service_uri = None' (comment: 'In-memory session configuration - no persistent storage') and passes it to get_fast_api_app at :67 \u2014 so the deployed ADK surface NEVER uses the durable DatabaseSessionService that runner.make_session_service (runner.py:74-78) defaults to. Meanwhile the product /api/* routes registered into the same app (fast_api_app.py:77) call run_digest -> build_storage -> SqliteBackend(settings.sqlite_path), whose default (config.py:82) is REPO_ROOT/data/catchup.db i.e. /code/data inside the container \u2014 Cloud Run's ephemeral, per-instance, wiped-on-restart filesystem. The Dockerfile (COPY at lines 23,27) ships only app/ and config/, never declares a VOLUME, and never sets STORAGE_BACKEND=firestore.",
     "impact": "Both durable-storage stories the docs advertise (persistent ADK sessions for resumable runs; Firestore/SQLite for the product DB) are DEAD on the actual deploy artifact. A deployed digest run would write its DigestRun/NewsItem rows to a disk that vanishes on the next cold start or scale-to-zero, and ADK session state is never persisted at all. This is the concrete, code-level core of the 'agents and gcp webapp and sqlite all scattered' complaint: the well-tested durable layer exists but is wired exclusively to the local run_digest/serve path, not the container the prod docs point at.",
@@ -176,9 +176,9 @@
     "severity": "medium",
     "category": "contract-drift",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/llm/runtime.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/pipeline/processing.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/docs/superpowers/specs/2026-05-23-adk-catchup-agent-design.md"
+      "app/llm/runtime.py",
+      "app/pipeline/processing.py",
+      "docs/superpowers/specs/2026-05-23-adk-catchup-agent-design.md"
     ],
     "evidence": "Spec \u00a713 line 193: \"Structured-output validation with one retry; on failure item stays raw\". Actual flow: adk_enrich (processing.py:62-66) calls run_agent_text(...) THEN parse_model_json(text, ProcessingResult). run_agent_text (runtime.py:83-109) retries `attempts = 1 + max(0, settings.llm_max_retries)` (default llm_max_retries=2, i.e. 3 attempts) but only inside its try around `_run_coro_sync(_run_text_async(...))` \u2014 parse_model_json runs AFTER it returns, OUTSIDE the retry loop. So a malformed-JSON / schema-mismatch (the actual \"structured-output validation\" failure) raises LLMOutputError and is NOT retried at all. It propagates to process_items (processing.py:155-159) which catches per BATCH and `continue`s, so EVERY item in that batch falls to status=\"raw\" (processing.py:164-166), not just the offending item. The retry that DOES exist is a transport retry on transient runner/timeout Exceptions, not validation, and its count is 2 not the spec's \"one\".",
     "impact": "A single transient model hiccup that yields slightly-off JSON discards up to llm_batch_size (default 8) enriched items per batch with no second attempt, and the resilience doc overstates a guarantee the code does not provide. Wastes the LLM call (no re-prompt) and silently degrades digest coverage. The mismatch between the documented guarantee and behavior is part of what makes the project feel \"not behaving the way it's supposed to\".",
@@ -193,7 +193,7 @@
     "severity": "medium",
     "category": "bug",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/services/youtube.py"
+      "app/services/youtube.py"
     ],
     "evidence": "adk_summarize (youtube.py:205-211) calls `raw = run_agent_text(agent, text, settings)` then `return DigestNarrative.model_validate_json(raw).narrative` \u2014 a raw Pydantic JSON parse. Every other LLM stage (processing.py:66, critic.py:71, digest_editor.py:48, judge.py:70) routes the model text through app.llm.parse.parse_model_json, which strips Markdown code fences and extracts the first balanced JSON value (parse.py:28-111). model_validate_json does none of that, so a fenced or prose-wrapped response (```json ... ``` or \"Here is the summary: {...}\") raises a hard ValidationError instead of being repaired.",
     "impact": "YouTube summaries are the only LLM output that crashes on the common code-fence/prose noise the rest of the pipeline tolerates. The failure isn't isolated like processing batches \u2014 it raises inside the youtube collector's summarize boundary, producing a source_error and dropping that item, inconsistently with every other stage.",
@@ -208,9 +208,9 @@
     "severity": "medium",
     "category": "dead-code",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/pipeline/digest_editor.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/pipeline/agents.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/runner.py"
+      "app/pipeline/digest_editor.py",
+      "app/pipeline/agents.py",
+      "app/runner.py"
     ],
     "evidence": "write_narrative(items, generate, top_n=12) (digest_editor.py:23-27) sorts by importance_score and caps to the top 12 before generating. grep shows its only callers are tests (tests/unit/test_digest_editor.py); it is NEVER called on the runtime path. The runtime path is DigestEditorAgent.narrator = _default_narrator = `adk_narrate(rendered, settings)` (runner.py:99-100; agents.py:400), where `rendered = select_rendered(items)` (runner.py:111-113) returns ALL processed items (or ALL non-flagged if none processed) with no cap. adk_narrate (digest_editor.py:41-48) JSON-serializes every one of those items' title/summary/category into a single LLM call.",
     "impact": "On a large run (many enabled sources) the digest editor receives an unbounded payload \u2014 higher token cost, higher latency, and risk of exceeding the model context, with no prioritization of what matters most. The intended top-12 \"what matters most\" curation exists in code and tests but never runs in production. This is exactly the kind of design-vs-reality gap the user senses.",
@@ -225,9 +225,9 @@
     "severity": "medium",
     "category": "contract-drift",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/pipeline/agents.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/frontend/components/digests/output-links.tsx",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/frontend/components/digests/run-detail.tsx"
+      "app/pipeline/agents.py",
+      "frontend/components/digests/output-links.tsx",
+      "frontend/components/digests/run-detail.tsx"
     ],
     "evidence": "Backend RenderAgent writes the run.outputs dict with keys 'md', 'xlsx', 'html' (app/pipeline/agents.py:438-440): run.outputs[\"md\"]=..., run.outputs[\"xlsx\"]=..., run.outputs[\"html\"]=.... The frontend OutputLinks component expects keys 'html', 'excel', 'markdown' (output-links.tsx:8-10 OUTPUT_ORDER=[\"html\",\"excel\",\"markdown\"]) and renders only entries where `key in outputs` (output-links.tsx:19). run-detail.tsx:108 passes run.outputs through verbatim with no remapping; a repo-wide grep found NO md->markdown / xlsx->excel translation anywhere in frontend src. So only 'html' intersects; 'md' and 'xlsx' are produced on disk but silently dropped by the UI filter.",
     "impact": "Two of the three digest deliverables (Markdown and Excel) are generated every run but are invisible in the console \u2014 the user sees only the HTML entry and may conclude the Markdown/Excel renderers are broken or missing, reinforcing the 'features not behaving as intended' complaint. It is a silent failure: no error, no console warning, just missing rows.",
@@ -242,10 +242,10 @@
     "severity": "medium",
     "category": "deployment",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/frontend/lib/api.ts",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/frontend/components/layout/health-pill.tsx",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/Dockerfile",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/fast_api_app.py"
+      "frontend/lib/api.ts",
+      "frontend/components/layout/health-pill.tsx",
+      "Dockerfile",
+      "app/fast_api_app.py"
     ],
     "evidence": "api.ts:46-48 (and the duplicated logic in health-pill.tsx:9-11) resolve the API base to '' (same-origin) when NODE_ENV==='production'. That is correct ONLY for the desktop single-port app, where create_app() calls mount_console(app, settings.console_dir) (app/api/app.py:366-367) so the FastAPI process serves both / and /api on one port. The Cloud Run path uses a DIFFERENT entrypoint: Dockerfile CMD runs app.fast_api_app:app on 8080 (Dockerfile:38) and only COPYs ./app and ./config (Dockerfile:23,27) \u2014 it never runs `next build` nor copies frontend/out. fast_api_app.py builds the ADK get_fast_api_app surface and calls register_product_routes() (fast_api_app.py:62-77) but never calls mount_console. So the deployed container serves /api/* and the ADK web UI but ships NO console. There is no environment in which a browser loads the static console from the Cloud Run origin, so the production same-origin '' base resolves against an origin that has no frontend.",
     "impact": "The 'frontend on Vercel/Cloud Run, same-origin in prod' story is only half-wired. If the console were hosted separately (e.g. Vercel) it would resolve base='' and call ITS OWN origin (no /api there) unless NEXT_PUBLIC_API_BASE is set \u2014 and nothing in the build sets it for that case. This is the concrete contract face of the user's 'gcp webapp and agents are scattered': the deployed product API and the deployed UI never coexist on one origin the way desktop does.",
@@ -334,13 +334,13 @@
     "severity": "medium",
     "category": "security",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/.env"
+      "app/.env"
     ],
     "evidence": "app/.env:2 GOOGLE_API_KEY is a real active AIza-prefixed key, :3 GNEWS_API_KEY a real key. gitignored; git ls-files --error-unmatch returns did-not-match (untracked) and git log --all shows it was never committed, so the repo is clean, but the secret is live on disk.",
     "impact": "Usable credentials billing/quotaing against the owner (Google) and a paid-tier GNews key. No source-control leak, but a live-credential exposure on disk and in this session transcript.",
     "recommendation": "Rotate both keys (AI Studio + GNews). Keep live keys out of working-tree dotenvs; add a gitleaks pre-commit scan in CI.",
     "dimension": "security",
-    "verifier_notes": "Core technical claims fully verified against /Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/.env. Line 2 GOOGLE_API_KEY=\"AIzaSyDuECT3D5N3eEeXLV8ZfKHooIac7UisjL8\" is a 39-char AIza-prefixed Google AI Studio/Gemini key (correct length+prefix, not a placeholder; file header says \"AI Studio Configuration\"). Line 3 GNEWS_API_KEY=\"df3dfc5afd0bb588d0fb2097bf900504\" is a 32-char hex GNews key, also not a placeholder. File exists on disk (398B). The \"repo is clean\" sub-claims all check out: git ls-files --error-unmatch returns \"did not match\" (untracked); git check-ignore shows .gitignore:2:.env ignores it; git log --all -- app/.env is empty (never committed); grep over tracked .py/.md/.json/.yaml finds no reference to the key. So there is NO source-control leak \u2014 the finding correctly and honestly states this itself. The exposure is real but confined to local disk (and this transcript), correctly gitignored and never committed. Because the blast radius is local-only rather than a published/version-controlled secret, \"high\" is overstated; downgrade to medium. The finding is real and accurately described, just over-rated on severity \u2014 hence partial.",
+    "verifier_notes": "Core technical claims fully verified against app/.env. Line 2 GOOGLE_API_KEY=\"AIzaSyDuECT3D5N3eEeXLV8ZfKHooIac7UisjL8\" is a 39-char AIza-prefixed Google AI Studio/Gemini key (correct length+prefix, not a placeholder; file header says \"AI Studio Configuration\"). Line 3 GNEWS_API_KEY=\"df3dfc5afd0bb588d0fb2097bf900504\" is a 32-char hex GNews key, also not a placeholder. File exists on disk (398B). The \"repo is clean\" sub-claims all check out: git ls-files --error-unmatch returns \"did not match\" (untracked); git check-ignore shows .gitignore:2:.env ignores it; git log --all -- app/.env is empty (never committed); grep over tracked .py/.md/.json/.yaml finds no reference to the key. So there is NO source-control leak \u2014 the finding correctly and honestly states this itself. The exposure is real but confined to local disk (and this transcript), correctly gitignored and never committed. Because the blast radius is local-only rather than a published/version-controlled secret, \"high\" is overstated; downgrade to medium. The finding is real and accurately described, just over-rated on severity \u2014 hence partial.",
     "confidence": "high",
     "verdict": "partial"
   },
@@ -349,7 +349,7 @@
     "severity": "medium",
     "category": "security",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/services/net.py"
+      "app/services/net.py"
     ],
     "evidence": "safe_get (net.py:74-132) sets a timeout and reads the full body via client.send; callers use resp.text/content (rss.py:16, scrape.py:17, youtube.py:54, newsapi.py:32, feed_discovery.py:16, youtube_resolve.py:22). No Content-Length check, no streaming byte ceiling, no oversized-body abort. feedparser and BeautifulSoup parse the entire payload in memory. The promised SSRF size limit is missing; only time exists.",
     "impact": "A user-supplied source URL (PUT sources/resolve) at a public endpoint streaming a huge or endless body within the timeout can exhaust memory and OOM-kill the process. IP-pin/scheme do not help since the target is a legitimate public host. A DoS amplification vector on a user-controlled, server-fetched input.",
@@ -364,8 +364,8 @@
     "severity": "medium",
     "category": "security",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/services/ratelimit.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/api/app.py"
+      "app/services/ratelimit.py",
+      "app/api/app.py"
     ],
     "evidence": "TokenBucket (ratelimit.py:8-37) is a single shared bucket with no per-IP/key dimension. app.py:144-149 apply it only to POST runs (273) and POST sources resolve (284); read routes and PUT sources/watchlist have none. Collectors call safe_get unthrottled, so spec per-source rate limiting is absent.",
     "impact": "One client can drain the bucket and deny POST runs/resolve to everyone (cross-tenant DoS); read/PUT routes are unthrottled. Per-source rate-limit promise undelivered. OK for single-user desktop, inadequate for the advertised Cloud Run deploy.",
@@ -432,9 +432,9 @@
     "severity": "medium",
     "category": "deployment",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/Dockerfile",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/fast_api_app.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/frontend/next.config.ts"
+      "Dockerfile",
+      "app/fast_api_app.py",
+      "frontend/next.config.ts"
     ],
     "evidence": "Dockerfile COPYs only ./app and ./config (lines 23,27) \u2014 never ./frontend, never runs npm/next build, has no node toolchain. The deploy entrypoint fast_api_app.py:77 calls register_product_routes(app, _settings) (mounts /api/*) but NEVER calls mount_console() \u2014 only app/api/app.py:367 (create_app, the desktop path) does. frontend/out is gitignored (.gitignore:29, frontend/.gitignore:18), so even the built export isn't in the image context. The console is a static export (next.config.ts:7 output:'export') that the desktop launcher builds at runtime (run.sh:132 NEXT_PUBLIC_API_BASE='' npm run build).",
     "impact": "Anyone who runs `agents-cli deploy` / docker-builds and hits the Cloud Run service gets the ADK agent web UI + bare JSON /api/* endpoints, but the actual product console (Dashboard/News/Digests/Sources/Watchlist/Settings) is absent. The README claims 'a deployed Next.js console reaches a real backend' (fast_api_app.py:73-74 comment) but the deployed container has no console to serve. This is a primary contributor to the 'gcp webapp feels disconnected' complaint.",
@@ -449,9 +449,9 @@
     "severity": "medium",
     "category": "architecture-drift",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/fast_api_app.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/runner.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/core/config.py"
+      "app/fast_api_app.py",
+      "app/runner.py",
+      "app/core/config.py"
     ],
     "evidence": "fast_api_app.py:57-58 hardcodes `session_service_uri = None` (in-memory ADK sessions) and passes it to get_fast_api_app \u2014 it never reads Settings.session_backend / session_db_url. The durable path exists ONLY in the local code: runner.py:74-78 make_session_service() honors settings.session_backend ('database' default, config.py:106) and resolves a SQLite/aiosqlite URL. So the well-tested DatabaseSessionService durability (proved in tests/integration/test_run_digest_database_session.py) is plumbed into run_digest/create_app but NOT into the deployed ADK surface. Same gap for storage: config default storage_backend='sqlite', sqlite_path=REPO_ROOT/data/catchup.db (config.py:81-82) \u2014 but the deploy container's agent (loaded via get_fast_api_app(agents_dir=AGENT_DIR)) writes SQLite to the container's ephemeral filesystem.",
     "impact": "The central design promise ('SQLite->Firestore, AI Studio->Vertex, APScheduler->Cloud Scheduler by config alone, no rewrite') is real for the local process and false for the only deployable artifact. A deployed run would use in-memory ADK sessions and write product SQLite to ephemeral disk that vanishes on container restart/redeploy \u2014 exactly the 'agents vs sqlite all scattered' incoherence. The docs' 'config-only swap' becomes a lie at the deployment boundary.",
@@ -466,9 +466,9 @@
     "severity": "medium",
     "category": "bug",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/agent.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/runner.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/fast_api_app.py"
+      "app/agent.py",
+      "app/runner.py",
+      "app/fast_api_app.py"
     ],
     "evidence": "agent.py:24-25 runs at module import: `_settings = Settings()` then `build_pipeline(_settings, build_storage(_settings), run_id=...)`. build_storage (runner.py:52-62) constructs SqliteBackend(settings.sqlite_path) and calls store.init_schema() \u2014 creating/opening data/catchup.db. The deploy container loads this agent because fast_api_app.py:62-63 calls get_fast_api_app(agents_dir=AGENT_DIR), which imports the `app` package's agent. So merely importing the deployed app writes a SQLite file to the container's ephemeral filesystem and builds a throwaway pipeline whose run_id is immediately discarded (run_digest generates its own).",
     "impact": "Import-time DB/filesystem writes in a Cloud Run container are fragile (read-only or ephemeral FS, cold-start cost, surprising side effects) and reinforce the storage incoherence. The work is wasted (the pipeline/run_id built here is never used by the product run path). It also makes the module non-importable in any read-only environment.",
@@ -483,10 +483,10 @@
     "severity": "medium",
     "category": "data-integrity",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/tests/integration/test_firestore_emulator.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/tests/unit/test_firestore_backend.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/tests/unit/fake_firestore.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/tests/unit/storage_contract.py"
+      "tests/integration/test_firestore_emulator.py",
+      "tests/unit/test_firestore_backend.py",
+      "tests/unit/fake_firestore.py",
+      "tests/unit/storage_contract.py"
     ],
     "evidence": "test_firestore_emulator.py:23-29 \u2014 `pytestmark = pytest.mark.skip(...)` and the single test body is `raise AssertionError(\"implement against the emulator before deploy\")`. It is the ONLY skip that fires at runtime. test_firestore_backend.py:11 constructs `FirestoreBackend(FakeFirestoreClient())` \u2014 the fake's own docstring (fake_firestore.py:1-4) says 'no real query semantics (no composite-index or inequality-filter constraints)'. The shared StorageContract (storage_contract.py) always seeds items WITH a status, so the documented SQLite-NULL vs Firestore `is_flagged == False`-doesn't-match-missing-field data-loss divergence (recorded in test_firestore_emulator.py:14-16) is never exercised by any test.",
     "impact": "The headline 'swap SQLite->Firestore by config only' claim is UNTESTED against any real store. The first real Firestore query in prod could fail on a missing composite index or silently drop docs whose is_flagged field is absent \u2014 exactly the data loss the stub warns about. The contract-green status is misleading: it proves adapter logic, not Firestore compatibility.",
@@ -501,10 +501,10 @@
     "severity": "medium",
     "category": "contract-drift",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/frontend/lib/api.test.ts",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/frontend/lib/schemas.ts",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/frontend/lib/categories.ts",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/frontend/lib/hooks.ts"
+      "frontend/lib/api.test.ts",
+      "frontend/lib/schemas.ts",
+      "frontend/lib/categories.ts",
+      "frontend/lib/hooks.ts"
     ],
     "evidence": "api.test.ts:8-13 etc. stub global fetch with hand-written payloads; api.test.ts:78-88 proves Zod REJECTS a malformed shape \u2014 but the 'correct' shapes in the tests are authored by the test, not derived from the backend. So the schemas are validated against themselves. Verified that lib/schemas.ts, lib/categories.ts, lib/hooks.ts have NO matching *.test.ts (contradicting the mapping's claim that every helper has a test). The backend\u2194frontend shape agreement (e.g. category_counts enum keys, settings fields, the 5th 'youtube' source type, org_id/user_id) is maintained by hand with no automated guard.",
     "impact": "If the FastAPI response shape changes (renamed field, new required key, changed enum value), the frontend Zod schema will start throwing ApiError(status:0) at runtime for real users, but the entire frontend test suite stays green because it never sees a real backend response. This is a classic false-confidence vector across the API seam.",
@@ -519,16 +519,16 @@
     "severity": "medium",
     "category": "incompleteness",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/tests/unit/test_llm_runtime.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/tests/unit/test_llm_parse.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/tests/integration/test_pipeline_live_bridge.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/tests/eval/baseline.json"
+      "tests/unit/test_llm_runtime.py",
+      "tests/unit/test_llm_parse.py",
+      "tests/integration/test_pipeline_live_bridge.py",
+      "tests/eval/baseline.json"
     ],
     "evidence": "Every integration test injects the processor/critic/narrator callable (e.g. test_run_digest.py:42-44, test_pipeline_tree.py:77-84), so adk_enrich/adk_critique \u2014 which compose the prompt, call run_agent_text, and run parse_model_json \u2014 are bypassed. test_llm_runtime/test_adk_runtime fake `_run_text_async`, and test_llm_parse feeds parse_model_json hand-written JSON. No test connects a realistic model text output through run_agent_text into parse_model_json into the ItemEnrichment/ProcessingResult schema. baseline.json is n=35 with all-passing synthetic verdicts; test_eval_harness uses fake judges; the live judge loop has by the docs' own admission never run (quota-deferred).",
     "impact": "A silent disagreement between a prompt template, an agent output_schema, and parse_model_json (e.g. a renamed field, a new enum value, a category the prompt emits that the schema rejects) would not be caught by any offline test \u2014 only by a live Gemini run, which has never been executed in the eval loop. The 'structured output is load-bearing' question (output_schema AND parse_model_json both run) is unresolved by tests.",
     "recommendation": "Add one offline 'realistic model output' test that feeds a hand-crafted but representative Gemini-style JSON (with code fences, an extra field, etc.) through the actual adk_enrich parse path into ItemEnrichment, asserting the full chain. Separately, run the live eval loop once when quota allows and replace the synthetic baseline.json with a real one (or label it clearly as synthetic).",
     "dimension": "test-quality",
-    "verifier_notes": "Attempted to refute; the finding holds on every point against the real code.\n\nCHAIN IS TESTED ONLY IN DISCONNECTED PIECES \u2014 confirmed:\n- The real chain lives in app/pipeline/processing.py:62-66 adk_enrich = build_processing_agent (output_schema=ProcessingResult, line 56) -> run_agent_text (line 65) -> parse_model_json(text, ProcessingResult) (line 66). adk_reprocess (105-114), critic adk_critique, judge adk_judge (judge.py:60-69), narrator adk_narrate are structured identically.\n- grep across tests/ shows NO test ever references adk_enrich / adk_reprocess / adk_critique / adk_narrate / adk_judge. Zero. The real composed functions are never called offline.\n- Integration tests inject already-built schema objects, bypassing the chain: test_run_digest.py passes processor=lambda items: ProcessingResult(items=[]), narrator=lambda items: \"\", critic=lambda items: []. test_pipeline_tree.py injects a fake_processor returning hand-built ProcessingResult(ItemEnrichment(...)). agents.py (build_pipeline, 453-543) and runner.run_digest expose processor/narrator/critic/reprocessor as injectable params defaulting to _default_* (runner.py:95-108) \u2014 so the default LLM path is replaceable and is replaced in every test.\n- test_llm_runtime.py and test_pipeline_live_bridge.py monkeypatch runtime._run_text_async to return canned strings (\"OK\"/\"canned model output\") \u2014 they test the retry/timeout/loop-bridge logic of run_agent_text, never a realistic model JSON through to a schema.\n- test_llm_parse.py feeds hand-written JSON literals to parse_model_json against throwaway _Item/_Result/_Verdicts models \u2014 never the production ItemEnrichment/ProcessingResult schema, and never text that originated from the prompt/agent.\n- test_judge.py:84 test_enrichment_verdicts_round_trip only does ev.model_dump_json() -> model_validate_json() on a hand-built object; no run_agent_text, no parse_model_json. test_judge.py:40 only asserts the agent's output_schema/name.\n- No test connects realistic model text -> run_agent_text -> parse_model_json -> ItemEnrichment/ProcessingResult. The 'output_schema AND parse_model_json both load-bearing' question is unresolved offline. processing.py:63 even comments adk_enrich is \"Validated by the live smoke (needs GOOGLE_API_KEY)\".\n\nBASELINE IS SYNTHETIC, NEVER LIVE-VALIDATED \u2014 confirmed:\n- tests/eval/baseline.json is n=35, passed=true, failures=[] with round pass-rates (faithfulness 1.0 etc).\n- The eval unit tests (tests/unit/test_eval_harness.py) run via fake_enrich + fake_judge/_perfect/_zero/_gold; verdicts carry reason=\"synthetic\" (line 20). tests/unit/test_eval_score.py only tests aggregate/compare math on hand-built _report(...) EvalReports.\n- Docs confirm the live loop has never run: docs/eval/README.md:15 \"Live (requires GOOGLE_API_KEY \u2014 deferred until quota is available)\"; :87 run --live \"when quota is available\" to get real scores; docs/ADK-GUIDE.md:151 \"Tests inject fakes (synthetic Pydantic results / fixtures)... real adk_* functions are the live path, validated by a live smoke when a key is present\"; plan8 \"Deferred to quota: a live end-to-end tree run.\" scripts/eval_enrichment.py:213 hard-requires GOOGLE_API_KEY for live mode and prints \"Offline mode: no live model calls\" otherwise.\n\nSEVERITY: medium is correct, not higher. Mitigating: output_schema=ProcessingResult is set server-side on every agent (constrains the model), the adk_* wrappers are intentionally ~3 lines each, the parse/schema/retry components are individually well-tested, and a real live smoke path (scripts/eval_enrichment.py --live, --calibrate, --check-regression) exists \u2014 it is simply unexecuted due to Gemini quota. So this is a genuine test-coverage/eval-validation incompleteness (a prompt/schema/parser disagreement would escape all offline tests, and the baseline numbers are placeholders) rather than a live defect. Not low (the integration seam truly has zero offline coverage and the baseline is non-empirical), not high (no evidence of an actual mismatch; components are correct in isolation).\n\nRelevant files: /Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/pipeline/processing.py, /app/pipeline/judge.py, /app/runner.py, /app/pipeline/agents.py, /tests/unit/test_llm_runtime.py, /tests/unit/test_llm_parse.py, /tests/unit/test_judge.py, /tests/unit/test_eval_harness.py, /tests/unit/test_eval_score.py, /tests/integration/test_pipeline_live_bridge.py, /tests/integration/test_run_digest.py, /tests/integration/test_pipeline_tree.py, /tests/eval/baseline.json, /scripts/eval_enrichment.py, /docs/eval/README.md, /docs/ADK-GUIDE.md",
+    "verifier_notes": "Attempted to refute; the finding holds on every point against the real code.\n\nCHAIN IS TESTED ONLY IN DISCONNECTED PIECES \u2014 confirmed:\n- The real chain lives in app/pipeline/processing.py:62-66 adk_enrich = build_processing_agent (output_schema=ProcessingResult, line 56) -> run_agent_text (line 65) -> parse_model_json(text, ProcessingResult) (line 66). adk_reprocess (105-114), critic adk_critique, judge adk_judge (judge.py:60-69), narrator adk_narrate are structured identically.\n- grep across tests/ shows NO test ever references adk_enrich / adk_reprocess / adk_critique / adk_narrate / adk_judge. Zero. The real composed functions are never called offline.\n- Integration tests inject already-built schema objects, bypassing the chain: test_run_digest.py passes processor=lambda items: ProcessingResult(items=[]), narrator=lambda items: \"\", critic=lambda items: []. test_pipeline_tree.py injects a fake_processor returning hand-built ProcessingResult(ItemEnrichment(...)). agents.py (build_pipeline, 453-543) and runner.run_digest expose processor/narrator/critic/reprocessor as injectable params defaulting to _default_* (runner.py:95-108) \u2014 so the default LLM path is replaceable and is replaced in every test.\n- test_llm_runtime.py and test_pipeline_live_bridge.py monkeypatch runtime._run_text_async to return canned strings (\"OK\"/\"canned model output\") \u2014 they test the retry/timeout/loop-bridge logic of run_agent_text, never a realistic model JSON through to a schema.\n- test_llm_parse.py feeds hand-written JSON literals to parse_model_json against throwaway _Item/_Result/_Verdicts models \u2014 never the production ItemEnrichment/ProcessingResult schema, and never text that originated from the prompt/agent.\n- test_judge.py:84 test_enrichment_verdicts_round_trip only does ev.model_dump_json() -> model_validate_json() on a hand-built object; no run_agent_text, no parse_model_json. test_judge.py:40 only asserts the agent's output_schema/name.\n- No test connects realistic model text -> run_agent_text -> parse_model_json -> ItemEnrichment/ProcessingResult. The 'output_schema AND parse_model_json both load-bearing' question is unresolved offline. processing.py:63 even comments adk_enrich is \"Validated by the live smoke (needs GOOGLE_API_KEY)\".\n\nBASELINE IS SYNTHETIC, NEVER LIVE-VALIDATED \u2014 confirmed:\n- tests/eval/baseline.json is n=35, passed=true, failures=[] with round pass-rates (faithfulness 1.0 etc).\n- The eval unit tests (tests/unit/test_eval_harness.py) run via fake_enrich + fake_judge/_perfect/_zero/_gold; verdicts carry reason=\"synthetic\" (line 20). tests/unit/test_eval_score.py only tests aggregate/compare math on hand-built _report(...) EvalReports.\n- Docs confirm the live loop has never run: docs/eval/README.md:15 \"Live (requires GOOGLE_API_KEY \u2014 deferred until quota is available)\"; :87 run --live \"when quota is available\" to get real scores; docs/ADK-GUIDE.md:151 \"Tests inject fakes (synthetic Pydantic results / fixtures)... real adk_* functions are the live path, validated by a live smoke when a key is present\"; plan8 \"Deferred to quota: a live end-to-end tree run.\" scripts/eval_enrichment.py:213 hard-requires GOOGLE_API_KEY for live mode and prints \"Offline mode: no live model calls\" otherwise.\n\nSEVERITY: medium is correct, not higher. Mitigating: output_schema=ProcessingResult is set server-side on every agent (constrains the model), the adk_* wrappers are intentionally ~3 lines each, the parse/schema/retry components are individually well-tested, and a real live smoke path (scripts/eval_enrichment.py --live, --calibrate, --check-regression) exists \u2014 it is simply unexecuted due to Gemini quota. So this is a genuine test-coverage/eval-validation incompleteness (a prompt/schema/parser disagreement would escape all offline tests, and the baseline numbers are placeholders) rather than a live defect. Not low (the integration seam truly has zero offline coverage and the baseline is non-empirical), not high (no evidence of an actual mismatch; components are correct in isolation).\n\nRelevant files: app/pipeline/processing.py, /app/pipeline/judge.py, /app/runner.py, /app/pipeline/agents.py, /tests/unit/test_llm_runtime.py, /tests/unit/test_llm_parse.py, /tests/unit/test_judge.py, /tests/unit/test_eval_harness.py, /tests/unit/test_eval_score.py, /tests/integration/test_pipeline_live_bridge.py, /tests/integration/test_run_digest.py, /tests/integration/test_pipeline_tree.py, /tests/eval/baseline.json, /scripts/eval_enrichment.py, /docs/eval/README.md, /docs/ADK-GUIDE.md",
     "confidence": "high",
     "verdict": "confirmed"
   },
@@ -632,7 +632,7 @@
     "impact": "Fatal config errors burn the retry budget on every LLM call.",
     "recommendation": "Retry only timeouts/5xx/429; re-raise auth/404/ValidationError.",
     "dimension": "backend-correctness",
-    "verifier_notes": "Technical claim is accurate. In /Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/llm/runtime.py the function run_agent_text spans lines 83-109; line 100 is a bare `except Exception as exc` whose inline comment claims it only catches \"transient runner/timeout failures,\" but it actually catches every exception including non-transient ones (401 auth, 404 model-not-found, ValidationError). Retry budget = 1 + max(0, llm_max_retries); config.py default llm_max_retries=2 so attempts=3, with llm_backoff_base=0.5 and llm_timeout=60. So a fatal config error is retried 3x with ~1.5s total backoff sleep before re-raising, at every LLM call site (judge.py:69, processing.py:65/113, digest_editor.py:47, critic.py:70, youtube.py:210).\n\nWhy the medium severity is overstated to low: (1) the last exception is always re-raised (lines 102-103 break + line 109 `raise last_exc`), so fatal errors are NOT swallowed \u2014 only delayed. (2) The waste is bounded and small: at most 2 extra LLM round-trips plus ~1.5s sleep per call; no infinite loop, no data corruption, no security impact. For an immediate 401/404 rejection the extra calls are fast and cheap; the main cost is the deliberate time.sleep. This is a legitimate efficiency/code-clarity bug (over-broad catch contradicting its own comment) but minor in real impact \u2014 appropriate severity is low, not medium. Confirmed-but-overstated => partial.",
+    "verifier_notes": "Technical claim is accurate. In app/llm/runtime.py the function run_agent_text spans lines 83-109; line 100 is a bare `except Exception as exc` whose inline comment claims it only catches \"transient runner/timeout failures,\" but it actually catches every exception including non-transient ones (401 auth, 404 model-not-found, ValidationError). Retry budget = 1 + max(0, llm_max_retries); config.py default llm_max_retries=2 so attempts=3, with llm_backoff_base=0.5 and llm_timeout=60. So a fatal config error is retried 3x with ~1.5s total backoff sleep before re-raising, at every LLM call site (judge.py:69, processing.py:65/113, digest_editor.py:47, critic.py:70, youtube.py:210).\n\nWhy the medium severity is overstated to low: (1) the last exception is always re-raised (lines 102-103 break + line 109 `raise last_exc`), so fatal errors are NOT swallowed \u2014 only delayed. (2) The waste is bounded and small: at most 2 extra LLM round-trips plus ~1.5s sleep per call; no infinite loop, no data corruption, no security impact. For an immediate 401/404 rejection the extra calls are fast and cheap; the main cost is the deliberate time.sleep. This is a legitimate efficiency/code-clarity bug (over-broad catch contradicting its own comment) but minor in real impact \u2014 appropriate severity is low, not medium. Confirmed-but-overstated => partial.",
     "confidence": "high",
     "verdict": "partial"
   },
@@ -641,8 +641,8 @@
     "severity": "low",
     "category": "data-integrity",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/adapters/storage/sqlite_backend.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/adapters/storage/firestore_backend.py"
+      "app/adapters/storage/sqlite_backend.py",
+      "app/adapters/storage/firestore_backend.py"
     ],
     "evidence": "SQLite's default-exclude clause is NULL-tolerant: sqlite_backend.py:100 and :145 use \"(status IS NULL OR status != 'flagged')\", so rows whose status field is absent/NULL are RETURNED. Firestore's equivalent is firestore_backend.py:67,94 \"where('is_flagged', '==', False)\" over a derived boolean (line 49: data['is_flagged'] = item.status == 'flagged'). Real Firestore '== False' does NOT match documents that lack the is_flagged field entirely \u2014 so any doc written before the is_flagged convention (or by a different writer) would be SILENTLY EXCLUDED from default queries, whereas SQLite would include it. test_firestore_emulator.py:14-16 itself flags this as pre-deploy checklist step 4 ('Backfill is_flagged=False ... does NOT match a missing field \u2014 unlike SQLite NULL-status handling'). The fake never exercises this because it stores is_flagged on every write.",
     "impact": "Same StorageBackend port, two different read semantics for missing data: a default 'show me the news' query can return different result SETS depending on backend. On Firestore this manifests as silent data loss (legitimate non-flagged items vanish from the dashboard/news list) for any document missing the derived field \u2014 exactly the kind of subtle dual-storage inconsistency that erodes trust in the abstraction.",
@@ -657,8 +657,8 @@
     "severity": "low",
     "category": "architecture-drift",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/api/app.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/runner.py"
+      "app/api/app.py",
+      "app/runner.py"
     ],
     "evidence": "app/api/app.py:157-158 defines storage() as a per-call factory: 'def storage(): return build_storage(settings)'; every read route calls it fresh \u2014 dashboard() app.py:218, list_runs() :237, get_run() :241, list_news() :251. build_storage (runner.py:52-62) unconditionally calls store.init_schema() at line 61 on every construction. For SQLite that re-runs CREATE TABLE IF NOT EXISTS + PRAGMA table_info introspection + CREATE INDEX IF NOT EXISTS on every request; for Firestore _firestore_client() (runner.py:40-49) reconstructs a brand-new firestore.Client (a fresh gRPC channel) per request \u2014 and pre-deploy checklist step 5 (test_firestore_emulator.py:18-19) explicitly warns to cache one client per process under real API traffic.",
     "impact": "Wasteful but mostly benign on SQLite (cheap DDL no-ops, though every request opens a new connection and re-runs PRAGMA). On Firestore it is a real performance/cost problem: a new gRPC client + channel handshake per request under production traffic, no connection pooling, higher latency and resource churn. It also means there is no single long-lived storage instance \u2014 contradicting the repository-singleton implied by the hexagonal design.",
@@ -673,8 +673,8 @@
     "severity": "low",
     "category": "data-integrity",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/adapters/storage/sqlite_backend.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/adapters/storage/firestore_backend.py"
+      "app/adapters/storage/sqlite_backend.py",
+      "app/adapters/storage/firestore_backend.py"
     ],
     "evidence": "sqlite_backend.py:114-115: 'def finalize_run(self, run): self.create_run(run)' \u2014 finalize is identical to create, both doing INSERT OR REPLACE (line 108) of the whole row. firestore_backend.py:73-74 mirrors this: finalize_run just calls create_run, which does a full document .set() (line 71). The port (storage.py:26-29) declares create_run and finalize_run as distinct methods implying distinct semantics, but neither backend does a conditional/transactional finalize (e.g. UPDATE WHERE status='running'). The denormalized status column (sqlite_backend.py:46,51,109) is only ever rewritten by these full-row replaces.",
     "impact": "Low in the current single-flight, single-writer model (run_trigger holds a process-wide lock so concurrent finalizes can't race). But the port's create/finalize distinction is decorative \u2014 finalize blindly overwrites the entire row, so a stale or out-of-order finalize would clobber a newer state, and there is no atomic 'mark this RUNNING run as SUCCESS' guarantee should the writer model ever change (multiple workers, retries).",
@@ -689,9 +689,9 @@
     "severity": "low",
     "category": "contract-drift",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/prompts/faithfulness_rubric.md",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/pipeline/critic.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/pipeline/judge.py"
+      "app/prompts/faithfulness_rubric.md",
+      "app/pipeline/critic.py",
+      "app/pipeline/judge.py"
     ],
     "evidence": "faithfulness_rubric.md line 11 has a dedicated clause: \"SENTIMENT APPROPRIATENESS: the stated sentiment (positive/neutral/negative) must be supported by the source tone; treat a clearly unsupported sentiment as a faithfulness problem.\" But _critic_payload (critic.py:51-64) serializes only {id, title, excerpt, summary_en, summary_ar} \u2014 no sentiment. _judge_payload (judge.py:39-57) serializes only {id, title, excerpt, enrichment:{category, importance_score, summary_en, summary_ar}} \u2014 no sentiment. Confirmed by grep: \"sentiment\" appears in neither critic.py nor judge.py nor eval_score.py. So both LLM-as-judge graders are asked to assess a field they never receive; the rubric clause is dead in both the runtime path and the offline eval path.",
     "impact": "The single shared rubric (a deliberate, well-engineered design point) silently contains a dimension that can never fire. An unfaithful/inverted sentiment will never be flagged or redacted at runtime, and the offline eval cannot detect sentiment miscalibration despite the rubric implying it does. Quality coverage is narrower than the rubric advertises.",
@@ -706,10 +706,10 @@
     "severity": "low",
     "category": "duplication",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/pipeline/processing.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/pipeline/critic.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/pipeline/judge.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/pipeline/digest_editor.py"
+      "app/pipeline/processing.py",
+      "app/pipeline/critic.py",
+      "app/pipeline/judge.py",
+      "app/pipeline/digest_editor.py"
     ],
     "evidence": "Every builder sets output_key (processing.py:57 \"processing_result\", critic.py:46 \"verdicts\", judge.py:34 \"verdicts\", digest_editor.py:36 \"digest_narrative\", youtube.py:201 \"youtube_summary\"). grep across app/api, app/pipeline/agents.py, app/runner.py finds zero reads of any of those state keys \u2014 the runtime instead re-parses the agent's raw final text with parse_model_json. So output_schema is set on the Agent AND parse_model_json re-parses the same result: two structured-output mechanisms, with the output_key/session-state mechanism entirely unused.",
     "impact": "Cognitive noise and a contradictory contract: a reader can't tell whether the structured output_schema (which constrains the model) or the manual text re-parse is load-bearing. Harmless at runtime but it muddies the otherwise-clean LLM layer and invites future bugs if someone starts trusting the never-populated output_key state.",
@@ -724,8 +724,8 @@
     "severity": "low",
     "category": "scope-gap",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/pipeline/agents.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/core/domain.py"
+      "app/pipeline/agents.py",
+      "app/core/domain.py"
     ],
     "evidence": "GuardrailCriticAgent writes run.flagged and run.critic_verdicts (agents.py:359-360) and they are stored in DigestRun (domain.py:186-187) and persisted in the SQLite blob. grep for \"critic_verdicts\" / \"flagged\" across app/api/ and frontend/lib/, frontend/components/ returns nothing \u2014 no endpoint or component exposes them. (Consistent with the missing Pipeline screen noted elsewhere.)",
     "impact": "The faithfulness guardrail does real, sound work (flag/redact/reflect) but its audit output \u2014 why an item was withheld, how many were flagged \u2014 is invisible to operators. A user can't see or trust the guardrail, reinforcing the \"agents feel disconnected from the app\" feeling even though the agent logic is correct.",
@@ -740,10 +740,10 @@
     "severity": "low",
     "category": "contract-drift",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/api/schemas.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/api/app.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/frontend/components/sources/source-form-dialog.tsx",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/frontend/lib/api.ts"
+      "app/api/schemas.py",
+      "app/api/app.py",
+      "frontend/components/sources/source-form-dialog.tsx",
+      "frontend/lib/api.ts"
     ],
     "evidence": "ResolveOut declares channel_id/url/name (app/api/schemas.py:38-42) and the frontend resolveSource return type mirrors it as { channel_id?; url?; name? } (api.ts:147-155). The source form reads it: `if (r.name && form.name.trim() === \"\") set(\"name\", r.name)` (source-form-dialog.tsx:125-127) to auto-fill the source name on Resolve. But the backend resolve_source handler ONLY ever returns ResolveOut(channel_id=cid) or ResolveOut(url=feed) (app/api/app.py:298,309) \u2014 a grep for `name=` in app/api/app.py / youtube_resolve.py / feed_discovery.py shows `name` is NEVER set on a ResolveOut. So r.name is always None.",
     "impact": "A user-facing affordance (auto-populate the source Name when you paste & Resolve a YouTube/RSS link) is dead \u2014 it silently never fires, so users always type names manually and may assume Resolve is half-broken. It is the kind of small 'doesn't behave as intended' gap that accumulates into the user's overall impression.",
@@ -758,7 +758,7 @@
     "severity": "low",
     "category": "contract-drift",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/frontend/lib/api.ts"
+      "frontend/lib/api.ts"
     ],
     "evidence": "Every other read goes through request(path, undefined, <zodSchema>) so a malformed body throws ApiError(0) (api.ts:72-82). resolveSource calls request(\"/api/sources/resolve\", { method: \"POST\", body }) with NO schema arg (api.ts:151-154), so the response is returned via the unchecked `return json as T` branch (api.ts:84) and blind-cast to { channel_id?; url?; name? }.",
     "impact": "Low: the backend response_model=ResolveOut guarantees the shape server-side, so in practice it's safe. But it's an inconsistency in the otherwise-uniform validate-at-the-boundary discipline; if the backend ever changes ResolveOut, the frontend won't fail loudly the way every other endpoint does.",
@@ -773,9 +773,9 @@
     "severity": "low",
     "category": "contract-drift",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/core/domain.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/frontend/lib/schemas.ts",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/api/app.py"
+      "app/core/domain.py",
+      "frontend/lib/schemas.ts",
+      "app/api/app.py"
     ],
     "evidence": "DigestRun carries flagged:int and critic_verdicts:list[dict] (app/core/domain.py:186-187). GET /api/runs and GET /api/news have NO response_model (app/api/app.py:232-237, 247-253), so FastAPI serializes the FULL Pydantic objects including flagged/critic_verdicts; the response_model'd routes (/dashboard, /runs/{id}) embed DigestRun directly and also include them. The frontend digestRunSchema (schemas.ts:59-72) lists neither field. Because it's a plain z.object (non-strict), Zod silently strips the extra keys rather than failing.",
     "impact": "No runtime break \u2014 Zod tolerates the extra keys. But it confirms the guardrail/critic audit data (the count of redacted items and the per-item verdicts) reaches the API yet has no frontend schema or screen to land in \u2014 the same 'missing Pipeline screen' gap the mapping phase flagged, seen from the contract side. The dual no-response_model routes also mean the OpenAPI/typed contract for /runs and /news is implicit rather than declared.",
@@ -826,7 +826,7 @@
     "severity": "low",
     "category": "security",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/services/render/markdown.py"
+      "app/services/render/markdown.py"
     ],
     "evidence": "markdown.py:39 interpolates item.title/url/source_name raw into Markdown link syntax and :41 the summary raw. Those come from untrusted third-party RawItem content. Unlike html.py (html.escape + safe_href per field), markdown applies no escaping and no http(s) href allowlist; a javascript-scheme URL or link metacharacters pass verbatim.",
     "impact": "Low today (file artifact), but Markdown is a transport format: once rendered to HTML (email/docs/viewer) the unescaped title/url is stored XSS or link injection. Inconsistent trust model vs the HTML renderer.",
@@ -868,7 +868,7 @@
     "impact": "A no-op parameter that exists only to be ignored \u2014 textbook unused forward-compat hook. It misleads callers into thinking they can control the run_id through the factory, and the agent.py call wastes an import-time uuid.",
     "recommendation": "Remove the run_id parameter from build_pipeline entirely (run_id is seeded via session state) and drop the run_id kwarg at agent.py:25. If a future use is real, add it when it's real, not speculatively.",
     "dimension": "dead-duplication-overeng",
-    "verifier_notes": "All three core claims verified against the actual code.\n\n1. build_pipeline's run_id param IS unused. Signature: agents.py:457 `run_id: str | None = None`. The function body (agents.py:474-543) never references it \u2014 `grep -n \"run_id\"` over agents.py shows the only mentions inside build_pipeline are the docstring lines (466, 468, 471). The docstring at agents.py:471-472 explicitly states: \"The build_pipeline `run_id` param is accepted for forward compatibility but unused here \u2014 PipelineInitAgent reads it from ctx.session.state.\"\n\n2. agent.py:25 calls `build_pipeline(_settings, build_storage(_settings), run_id=uuid.uuid4().hex[:12])` at module import. Since build_pipeline discards the arg and agent.py never seeds any session state with it, this import-time uuid is thrown away. PipelineInitAgent (agents.py:164-168) reads run_id from ctx.session.state and only falls back to its own `uuid.uuid4().hex[:12]` when absent \u2014 which is exactly what happens for the agent.py-constructed root_agent.\n\n3. The real seeding mechanism confirms the param's redundancy: runner.py:118-120 does `create_session(..., state={\"run_id\": run_id})` \u2014 that is how run_id actually reaches PipelineInitAgent. Notably even the legitimate caller run_digest (runner.py:165-167) passes `run_id=run_id` to build_pipeline redundantly, then separately seeds it via session state. So the param is a no-op for every caller.\n\nSeverity correctly rated low / over-engineering: this is not a correctness bug (PipelineInitAgent's fallback and runner.py's session seeding both work correctly). The actual harm is a misleading API surface (callers reasonably assume the factory's run_id controls the run) plus one negligible wasted import-time uuid. It is a genuine textbook unused forward-compat hook, accurately described and not overstated. Relevant files: /Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/pipeline/agents.py (453-473, 160-176), /Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/agent.py (25), /Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/runner.py (116-198).",
+    "verifier_notes": "All three core claims verified against the actual code.\n\n1. build_pipeline's run_id param IS unused. Signature: agents.py:457 `run_id: str | None = None`. The function body (agents.py:474-543) never references it \u2014 `grep -n \"run_id\"` over agents.py shows the only mentions inside build_pipeline are the docstring lines (466, 468, 471). The docstring at agents.py:471-472 explicitly states: \"The build_pipeline `run_id` param is accepted for forward compatibility but unused here \u2014 PipelineInitAgent reads it from ctx.session.state.\"\n\n2. agent.py:25 calls `build_pipeline(_settings, build_storage(_settings), run_id=uuid.uuid4().hex[:12])` at module import. Since build_pipeline discards the arg and agent.py never seeds any session state with it, this import-time uuid is thrown away. PipelineInitAgent (agents.py:164-168) reads run_id from ctx.session.state and only falls back to its own `uuid.uuid4().hex[:12]` when absent \u2014 which is exactly what happens for the agent.py-constructed root_agent.\n\n3. The real seeding mechanism confirms the param's redundancy: runner.py:118-120 does `create_session(..., state={\"run_id\": run_id})` \u2014 that is how run_id actually reaches PipelineInitAgent. Notably even the legitimate caller run_digest (runner.py:165-167) passes `run_id=run_id` to build_pipeline redundantly, then separately seeds it via session state. So the param is a no-op for every caller.\n\nSeverity correctly rated low / over-engineering: this is not a correctness bug (PipelineInitAgent's fallback and runner.py's session seeding both work correctly). The actual harm is a misleading API surface (callers reasonably assume the factory's run_id controls the run) plus one negligible wasted import-time uuid. It is a genuine textbook unused forward-compat hook, accurately described and not overstated. Relevant files: app/pipeline/agents.py (453-473, 160-176), app/agent.py (25), app/runner.py (116-198).",
     "confidence": "high",
     "verdict": "confirmed"
   },
@@ -885,7 +885,7 @@
     "impact": "Import-time side effects make the module non-inert: tooling that imports app.agent for introspection creates/migrates a SQLite file. This is also a second source-of-truth for the pipeline (root_agent vs run_digest), duplicating construction.",
     "recommendation": "Move root_agent construction behind a lazy factory (a function) or guard with a module-level cache that does no I/O at import. At minimum, don't call init_schema at import time.",
     "dimension": "dead-duplication-overeng",
-    "verifier_notes": "All technical claims verified against the real code and empirically reproduced.\n\nCHAIN CONFIRMED:\n- app/agent.py:24-26 runs unconditionally at module scope (no __main__ guard): _settings = Settings(); root_agent = build_pipeline(_settings, build_storage(_settings), run_id=uuid...); app = App(...).\n- app/runner.py:52-62 build_storage() calls store.init_schema(); and SqliteBackend.__init__ (sqlite_backend.py:19-21) also does Path(path).parent.mkdir(parents=True, exist_ok=True) \u2014 a filesystem write.\n- app/adapters/storage/sqlite_backend.py:42-63 init_schema() executes CREATE TABLE IF NOT EXISTS (news_items, digest_runs), ALTER TABLE ... ADD COLUMN (column migrations), and CREATE INDEX \u2014 genuine DB writes.\n- app/pipeline/agents.py:482 build_pipeline() calls load_watchlist(settings.config_dir), which (watchlist.py:26-31) reads config/watchlist.yaml.\n- Defaults (config.py:81-83): storage_backend='sqlite', sqlite_path=REPO_ROOT/data/catchup.db, config_dir=REPO_ROOT/config \u2014 so import with defaults writes to the repo's data dir.\n- ADK does import this module for discovery: vendored cli_deploy.py:571 errors unless agent.py exports root_agent or app, confirming playground/eval/deploy import app.agent.\n\nEMPIRICAL PROOF: With a temp SQLITE_PATH, `import app.agent` (no run invoked) turned a non-existent DB file into one containing tables ['digest_runs','news_items']. So merely importing the module materializes + migrates a SQLite schema. EVIDENCE is accurate.\n\nWHY SEVERITY DOWNGRADED to low (claimed medium is overstated):\n- The DDL is fully idempotent (IF NOT EXISTS / conditional ADD COLUMN); it creates an empty local schema, never destructive, no data loss, no network for the default sqlite backend.\n- Constructing root_agent at module import is the standard ADK scaffold pattern (ADK itself expects the export), so the 'non-inert module' part is conventional, not real drift. The genuinely surprising bit is the schema/file write riding along inside build_storage \u2014 that's a legitimate but low-impact smell, easily fixed by lazy storage init.\n- Secondary 'duplicate source-of-truth' impact is real but minor: agent.py and run_digest (runner.py:146-172) both call the shared build_pipeline factory, so it's duplicated invocation, not duplicated logic; the import-time root_agent is not used by run_digest.\n- Note: with storage_backend='firestore', build_storage would instead construct a live Firestore client at import (heavier side effect), but that is not the default.\n\nRelevant files (absolute): /Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/agent.py; /Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/runner.py (build_storage L52-62); /Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/adapters/storage/sqlite_backend.py (init_schema L42-63, __init__ L19-21); /Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/pipeline/agents.py (L482); /Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/services/watchlist.py (L26-31); /Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/core/config.py (L81-83).",
+    "verifier_notes": "All technical claims verified against the real code and empirically reproduced.\n\nCHAIN CONFIRMED:\n- app/agent.py:24-26 runs unconditionally at module scope (no __main__ guard): _settings = Settings(); root_agent = build_pipeline(_settings, build_storage(_settings), run_id=uuid...); app = App(...).\n- app/runner.py:52-62 build_storage() calls store.init_schema(); and SqliteBackend.__init__ (sqlite_backend.py:19-21) also does Path(path).parent.mkdir(parents=True, exist_ok=True) \u2014 a filesystem write.\n- app/adapters/storage/sqlite_backend.py:42-63 init_schema() executes CREATE TABLE IF NOT EXISTS (news_items, digest_runs), ALTER TABLE ... ADD COLUMN (column migrations), and CREATE INDEX \u2014 genuine DB writes.\n- app/pipeline/agents.py:482 build_pipeline() calls load_watchlist(settings.config_dir), which (watchlist.py:26-31) reads config/watchlist.yaml.\n- Defaults (config.py:81-83): storage_backend='sqlite', sqlite_path=REPO_ROOT/data/catchup.db, config_dir=REPO_ROOT/config \u2014 so import with defaults writes to the repo's data dir.\n- ADK does import this module for discovery: vendored cli_deploy.py:571 errors unless agent.py exports root_agent or app, confirming playground/eval/deploy import app.agent.\n\nEMPIRICAL PROOF: With a temp SQLITE_PATH, `import app.agent` (no run invoked) turned a non-existent DB file into one containing tables ['digest_runs','news_items']. So merely importing the module materializes + migrates a SQLite schema. EVIDENCE is accurate.\n\nWHY SEVERITY DOWNGRADED to low (claimed medium is overstated):\n- The DDL is fully idempotent (IF NOT EXISTS / conditional ADD COLUMN); it creates an empty local schema, never destructive, no data loss, no network for the default sqlite backend.\n- Constructing root_agent at module import is the standard ADK scaffold pattern (ADK itself expects the export), so the 'non-inert module' part is conventional, not real drift. The genuinely surprising bit is the schema/file write riding along inside build_storage \u2014 that's a legitimate but low-impact smell, easily fixed by lazy storage init.\n- Secondary 'duplicate source-of-truth' impact is real but minor: agent.py and run_digest (runner.py:146-172) both call the shared build_pipeline factory, so it's duplicated invocation, not duplicated logic; the import-time root_agent is not used by run_digest.\n- Note: with storage_backend='firestore', build_storage would instead construct a live Firestore client at import (heavier side effect), but that is not the default.\n\nRelevant files (absolute): app/agent.py; app/runner.py (build_storage L52-62); app/adapters/storage/sqlite_backend.py (init_schema L42-63, __init__ L19-21); app/pipeline/agents.py (L482); app/services/watchlist.py (L26-31); app/core/config.py (L81-83).",
     "confidence": "high",
     "verdict": "confirmed"
   },
@@ -995,9 +995,9 @@
     "severity": "low",
     "category": "deployment",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/agents-cli-manifest.yaml",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/README.md",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/docs/ADK-GUIDE.md"
+      "agents-cli-manifest.yaml",
+      "README.md",
+      "docs/ADK-GUIDE.md"
     ],
     "evidence": "agents-cli-manifest.yaml \u2014 the ONLY machine-readable deploy descriptor \u2014 carries stock scaffold defaults: deployment_target='none' (line 9), session_type='in_memory' (line 10), cicd_runner='skip' (line 11), datastore='none' (line 14), region='us-east1' (line 4). Meanwhile README.md:10-11 advertises 'scales to Google Cloud (Cloud Run + Cloud Scheduler + Vertex AI + Firestore) by configuration' and README.md:18 says these are 'wired and unit-tested'. There is no terraform/infra/deployment directory anywhere (find for *.tf returns nothing), so the `agents-cli infra single-project` path the CLAUDE.md guide references has produced no committed artifacts.",
     "impact": "If anyone runs `agents-cli deploy`, the manifest provisions a deployment target of none, in-memory sessions, and no datastore \u2014 i.e. NONE of the documented prod stack \u2014 so the deploy either no-ops or stands up an ephemeral container with no persistence. The manifest and the README describe two different products. region us-east1 also contradicts the project's own GOOGLE_CLOUD_LOCATION='global' default (config.py:116) and the CLAUDE.md model-404 guidance.",
@@ -1012,10 +1012,10 @@
     "severity": "low",
     "category": "architecture-drift",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/fast_api_app.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/api/app.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/scripts/run.sh",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/cli.py"
+      "app/fast_api_app.py",
+      "app/api/app.py",
+      "scripts/run.sh",
+      "app/cli.py"
     ],
     "evidence": "Desktop/serve path: scripts/run.sh:136 boots `uvicorn app.api.app:create_app --factory` on 127.0.0.1:8000 \u2014 console + /api/*, SQLite DatabaseSessionService, scheduler lifespan (app.py:337-349). Deploy path: Dockerfile:39 boots `uvicorn app.fast_api_app:app` on 0.0.0.0:8080 \u2014 ADK agent web UI + /api/* re-mount, in-memory sessions, NO scheduler lifespan, NO console. The scheduler (build_scheduler) is wired ONLY in create_app's _lifespan (app.py:339); fast_api_app.py has no lifespan, so even APScheduler-based scheduling is desktop-only. The two apps assemble routes differently and are mutually unaware.",
     "impact": "Two deploy surfaces with different storage, sessions, scheduling, and console behavior. There is no single 'this is how the product runs' answer \u2014 which is precisely the user's complaint. A reader cannot tell whether the agent pipeline, the SQLite product DB, and the web console are one system or three.",
@@ -1030,9 +1030,9 @@
     "severity": "low",
     "category": "deployment",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/tests/integration/test_deploy_surface.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/fast_api_app.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/Dockerfile"
+      "tests/integration/test_deploy_surface.py",
+      "app/fast_api_app.py",
+      "Dockerfile"
     ],
     "evidence": "test_deploy_surface.py:4-9 explicitly states it does NOT import app/fast_api_app.py ('it calls google.auth.default() and creates a Cloud Logging client at import time, which needs GCP creds. We test register_product_routes ... instead'). Grep confirms no test does `from app.fast_api_app import ...`. So the actual ASGI app the Dockerfile boots (`uvicorn app.fast_api_app:app`) \u2014 including its hardcoded in-memory sessions and its no-frontend behavior \u2014 is verified only by analogy to create_app.",
     "impact": "The two-entrypoint split (desktop create_app vs Docker fast_api_app) is the exact 'agents vs gcp webapp scattered' seam the user complains about, and the deployed half is the untested half. A divergence between register_product_routes-as-mounted-on-a-bare-app and the real fast_api_app assembly (CORS, session backend, auth wiring) would not be caught.",
@@ -1047,8 +1047,8 @@
     "severity": "low",
     "category": "dead-code",
     "files": [
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/app_utils/telemetry.py",
-      "/Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/app/app_utils/typing.py"
+      "app/app_utils/telemetry.py",
+      "app/app_utils/typing.py"
     ],
     "evidence": "Grep across tests/ for 'app_utils', 'telemetry', and 'Feedback' returns 0 references (excluding pycache). These are Google scaffold leftovers shipped in the importable package with no coverage and, per the mapping, no live callers in the product path.",
     "impact": "Low \u2014 they are small and not on the runtime path, but they inflate the package surface and any latent bug in them is invisible. Minor erosion of the 'every file is tested' confidence the suite otherwise earns.",
@@ -1135,7 +1135,7 @@
     "impact": "Disabled so harmless to the out-of-box run, but a dead template that yields zero items with no obvious cause if naively enabled.",
     "recommendation": "Replace with a real working disabled example or remove it from the committed defaults.",
     "dimension": "config-scope-drift",
-    "verifier_notes": "Evidence verified against /Users/ahmedsakr/Education/AI Engineering/Projects/ADK-CATCH-UP-Agent/config/sources.yaml lines 48-55: the example_scrape source is exactly as described \u2014 type scrape, url https://example.com/news, selector a.headline, category_hint business_finance, enabled false. example.com is the IANA-reserved illustration domain serving a static placeholder page (no /news path, no a.headline elements). Cross-checked the scrape handler at app/services/scrape.py: parse_page (lines 37-59) runs soup.select(source.selector); against the example.com page this matches nothing, the for-loop body never executes, and collect() returns an empty list. So if naively enabled it would silently produce zero items, matching the IMPACT claim. However, the finding is partially mitigated by an in-file comment on line 48 ('# Example scrape source \u2014 set a real selector before enabling.') that explicitly flags it as a configurable template, so the cause is not entirely non-obvious. It is also enabled: false out-of-the-box (line 55), so it is harmless to the default run. This is a deliberate, clearly-labeled template placeholder rather than accidental dead code. Severity 'low' is correct; arguably it could even be cosmetic given the explanatory comment, but low is defensible. Confirmed but benign.",
+    "verifier_notes": "Evidence verified against config/sources.yaml lines 48-55: the example_scrape source is exactly as described \u2014 type scrape, url https://example.com/news, selector a.headline, category_hint business_finance, enabled false. example.com is the IANA-reserved illustration domain serving a static placeholder page (no /news path, no a.headline elements). Cross-checked the scrape handler at app/services/scrape.py: parse_page (lines 37-59) runs soup.select(source.selector); against the example.com page this matches nothing, the for-loop body never executes, and collect() returns an empty list. So if naively enabled it would silently produce zero items, matching the IMPACT claim. However, the finding is partially mitigated by an in-file comment on line 48 ('# Example scrape source \u2014 set a real selector before enabling.') that explicitly flags it as a configurable template, so the cause is not entirely non-obvious. It is also enabled: false out-of-the-box (line 55), so it is harmless to the default run. This is a deliberate, clearly-labeled template placeholder rather than accidental dead code. Severity 'low' is correct; arguably it could even be cosmetic given the explanatory comment, but low is defensible. Confirmed but benign.",
     "confidence": "high",
     "verdict": "confirmed"
   }
