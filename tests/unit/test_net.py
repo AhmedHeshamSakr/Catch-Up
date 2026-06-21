@@ -99,6 +99,44 @@ def test_safe_get_strips_caller_supplied_host_header(monkeypatch):
     assert seen["host_count"] == 1
 
 
+def test_safe_get_rejects_oversized_content_length(monkeypatch):
+    # A response advertising a body over the cap is rejected before download.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"x" * 2000)  # httpx sets content-length=2000
+
+    monkeypatch.setattr(net.httpx, "Client", _mock_client_factory(handler))
+    with pytest.raises(UnsafeURLError, match="too large"):
+        safe_get("https://example.com/x", resolver=_resolver(["93.184.216.34"]), max_bytes=1000)
+
+
+def test_safe_get_rejects_oversized_stream(monkeypatch):
+    # No content-length (chunked); the streamed body crosses the cap mid-read.
+    class _Stream(httpx.SyncByteStream):
+        def __iter__(self):
+            yield b"x" * 50
+            yield b"x" * 50
+
+        def close(self) -> None:
+            pass
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=_Stream())
+
+    monkeypatch.setattr(net.httpx, "Client", _mock_client_factory(handler))
+    with pytest.raises(UnsafeURLError, match="exceeds"):
+        safe_get("https://example.com/x", resolver=_resolver(["93.184.216.34"]), max_bytes=10)
+
+
+def test_safe_get_allows_body_under_cap(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="ok")
+
+    monkeypatch.setattr(net.httpx, "Client", _mock_client_factory(handler))
+    resp = safe_get("https://example.com/x", resolver=_resolver(["93.184.216.34"]), max_bytes=1000)
+    assert resp.status_code == 200
+    assert resp.text == "ok"
+
+
 def test_rejects_empty_resolution():
     with pytest.raises(UnsafeURLError):
         validate_public_url("http://news.example.com", resolver=_resolver([]))

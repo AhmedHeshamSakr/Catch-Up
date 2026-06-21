@@ -79,6 +79,7 @@ def safe_get(
     headers: dict[str, str] | None = None,
     params: dict | None = None,
     max_redirects: int = 3,
+    max_bytes: int = 5_000_000,
 ) -> httpx.Response:
     """SSRF-safe HTTP GET: validates the public-ness of EVERY hop AND pins the IP.
 
@@ -122,11 +123,33 @@ def safe_get(
                 "GET", str(pinned), headers=req_headers,
                 params=next_params, extensions=extensions,
             )
-            resp = client.send(request)
-        if resp.is_redirect and resp.headers.get("location"):
-            location = resp.headers["location"]
-            current_url = str(httpx.URL(current_url).join(location))
-            next_params = None
-            continue
-        return resp
+            # Stream so we can abort an oversized body BEFORE pulling it all into
+            # memory — a user-supplied URL returning a multi-GB response from a
+            # legit public host would otherwise OOM the process.
+            resp = client.send(request, stream=True)
+            try:
+                if resp.is_redirect and resp.headers.get("location"):
+                    location = resp.headers["location"]
+                    current_url = str(httpx.URL(current_url).join(location))
+                    next_params = None
+                    continue
+                declared = resp.headers.get("content-length")
+                if declared is not None and declared.isdigit() and int(declared) > max_bytes:
+                    raise UnsafeURLError(
+                        f"response too large: {declared} bytes (> {max_bytes})"
+                    )
+                body = bytearray()
+                for chunk in resp.iter_bytes():
+                    body.extend(chunk)
+                    if len(body) > max_bytes:
+                        raise UnsafeURLError(f"response exceeds {max_bytes} bytes")
+                # Return a fully-read Response so callers use .text/.json/.content.
+                return httpx.Response(
+                    status_code=resp.status_code,
+                    headers=resp.headers,
+                    content=bytes(body),
+                    request=resp.request,
+                )
+            finally:
+                resp.close()
     raise UnsafeURLError(f"too many redirects (>{max_redirects}) for {url}")
