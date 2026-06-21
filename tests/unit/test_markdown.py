@@ -24,6 +24,24 @@ def test_render_markdown_groups_by_category():
     assert "Src" in out
 
 
+def test_render_markdown_guards_non_http_url():
+    """A non-http(s) URL must render as plain text, never an active link."""
+    run = DigestRun(run_id="r1")
+    item = _item("Click me", "javascript:alert(1)", Category.AI_TECH)
+    out = markdown.render_markdown(run, [item])
+    assert "javascript:alert(1)" not in out
+    assert "(javascript" not in out  # not emitted as a link target
+    assert "Click me" in out  # title still shown as text
+
+
+def test_render_markdown_escapes_link_syntax_in_title():
+    """A title with markdown link syntax can't inject a different link."""
+    run = DigestRun(run_id="r1")
+    item = _item("evil](http://x) [", "https://a.com/1", Category.AI_TECH)
+    out = markdown.render_markdown(run, [item])
+    assert "](http://x)" not in out  # the injected link target is escaped away
+
+
 def test_write_markdown_creates_file(tmp_path):
     run = DigestRun(run_id="rX")
     path = markdown.write_markdown(run, [_item("t", "https://a.com/9", Category.AI_TECH)], str(tmp_path))

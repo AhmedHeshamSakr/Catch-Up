@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.core.domain import Category, DigestRun, NewsItem
+from app.services.net import is_http_url
 
 CATEGORY_TITLES: dict[Category, str] = {
     Category.AI_TECH: "AI & Technology",
@@ -10,6 +11,14 @@ CATEGORY_TITLES: dict[Category, str] = {
     Category.WORLD_GEOPOLITICS: "World & Geopolitics",
     Category.GULF_MENA: "Gulf & MENA",
 }
+
+
+def _md_escape(text: str) -> str:
+    """Escape characters that would break markdown link/emphasis syntax, so a
+    crafted title/source can't inject a link or formatting."""
+    for ch in ("\\", "[", "]", "(", ")", "*", "`", "_"):
+        text = text.replace(ch, "\\" + ch)
+    return text
 
 
 def render_markdown(run: DigestRun, items: list[NewsItem]) -> str:
@@ -36,7 +45,14 @@ def render_markdown(run: DigestRun, items: list[NewsItem]) -> str:
         lines.append("")
         for item in group:
             badge = f" `{item.importance.value.upper()}`" if item.importance else ""
-            lines.append(f"- [{item.title}]({item.url}){badge} — *{item.source_name}*")
+            title = _md_escape(item.title)
+            source = _md_escape(item.source_name)
+            # Only link http(s) URLs (a javascript:/data: URL would become an
+            # active link); otherwise render the title as plain text.
+            if is_http_url(item.url):
+                lines.append(f"- [{title}]({item.url}){badge} — *{source}*")
+            else:
+                lines.append(f"- {title}{badge} — *{source}*")
             if item.summary_en:
                 lines.append(f"  {item.summary_en}")
         lines.append("")

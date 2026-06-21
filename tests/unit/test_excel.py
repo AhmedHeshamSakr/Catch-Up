@@ -56,3 +56,13 @@ def test_excel_row_maps_all_fields(tmp_path):
     assert "A summary." in values
     assert "HIGH" in values
     assert "OpenAI" in values
+
+
+def test_excel_neutralizes_formula_injection(tmp_path):
+    """A title starting with '=' must be stored as text ("'=..."), not a formula."""
+    run = DigestRun(run_id="rZ")
+    path = excel.write_excel(
+        run, [_item('=HYPERLINK("http://evil","x")', Category.AI_TECH)], str(tmp_path)
+    )
+    title = load_workbook(path)["All News"].cell(row=2, column=2).value
+    assert title.startswith("'=")  # apostrophe-prefixed → inert text

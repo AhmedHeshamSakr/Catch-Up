@@ -31,6 +31,12 @@ def build_scheduler(settings: Settings, trigger_fn: Callable[[], object]):
             log.info("scheduled digest skipped — a run is already in progress")
 
     scheduler = BackgroundScheduler(timezone=settings.schedule_timezone)
-    trigger = CronTrigger.from_crontab(cron, timezone=settings.schedule_timezone)
+    try:
+        trigger = CronTrigger.from_crontab(cron, timezone=settings.schedule_timezone)
+    except ValueError as exc:
+        # A bad cron value must NOT take down app startup (this runs in the FastAPI
+        # lifespan): log clearly and disable scheduling instead.
+        log.error("invalid schedule_cron %r: %s — scheduling disabled", cron, exc)
+        return None
     scheduler.add_job(_job, trigger, id="digest", replace_existing=True)
     return scheduler

@@ -1,7 +1,5 @@
 import logging
 
-import pytest
-
 from app.core.config import Settings
 from app.services.scheduler import build_scheduler
 
@@ -27,9 +25,15 @@ def test_enabled_has_one_cron_job():
     assert isinstance(jobs[0].trigger, CronTrigger)
 
 
-def test_bad_cron_raises():
-    with pytest.raises(ValueError):
-        build_scheduler(_s(schedule_enabled=True, schedule_cron="not a cron"), lambda: "x")
+def test_bad_cron_disables_scheduling_not_crash(caplog):
+    """A bad cron must NOT crash app startup (build_scheduler runs in the FastAPI
+    lifespan) — it logs and returns None (scheduling disabled) instead of raising."""
+    with caplog.at_level(logging.ERROR):
+        result = build_scheduler(
+            _s(schedule_enabled=True, schedule_cron="not a cron"), lambda: "x"
+        )
+    assert result is None
+    assert any("schedule_cron" in r.message for r in caplog.records)
 
 
 def test_job_calls_trigger_fn():
