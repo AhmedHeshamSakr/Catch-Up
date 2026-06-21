@@ -137,6 +137,6 @@ it from a fresh run.
 
 ## Architecture Notes
 
-- **Why a custom harness, not `agents-cli eval`?** `agents-cli eval` targets the conversational `root_agent`; `news_processor` is a batch structured-output agent — interface mismatch. See `processing-goldens.md` for historical context.
+- **Why a custom harness, not `agents-cli eval`?** `agents-cli eval` targets the conversational `root_agent`; `news_processor` is a batch structured-output agent — interface mismatch. See `processing-goldens.md` for historical context. The ADK-native scaffold evalset (`tests/eval/evalsets/basic.evalset.json` + `eval_config.json`, greeting/weather cases) was **removed** as intentionally unused — this enrichment harness is the project's eval.
 - **ADK output_schema wrapping:** ADK requires a Pydantic model (not a bare list) as `output_schema`. `EnrichmentVerdicts` wraps `list[EnrichmentVerdict]` for this reason.
 - **EnrichFn / JudgeFn are injectable** — in tests, swap real ADK calls for synthetic functions; in `--live` mode, bind `adk_enrich` / `adk_judge` from the pipeline.
