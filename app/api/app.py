@@ -7,10 +7,12 @@ import os
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 from urllib.parse import urlsplit
 
 from fastapi import (
     APIRouter,
+    Body,
     Depends,
     FastAPI,
     Header,
@@ -54,6 +56,20 @@ except importlib.metadata.PackageNotFoundError:  # pragma: no cover
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 _LOOPBACK_IPS = {"127.0.0.1", "::1"}
 
+# Hard cap on items returned for a single run detail (a run is naturally bounded;
+# never return an unbounded list).
+_RUN_ITEMS_CAP = 5000
+
+
+def _loggable_url(url: str) -> str:
+    """scheme://host only — never log a full URL (it can carry credentials,
+    tokens, or private query params)."""
+    try:
+        parts = urlsplit(url)
+        return f"{parts.scheme}://{parts.hostname}" if parts.hostname else "<unparseable>"
+    except ValueError:
+        return "<unparseable>"
+
 
 def _hostname(value: str) -> str:
     """Lowercased hostname of a ``host[:port]`` or full URL ('' if unparseable)."""
@@ -76,6 +92,26 @@ def _require_local_write(request: Request) -> None:
     ref = request.headers.get("origin") or request.headers.get("referer")
     if ref and _hostname(ref) not in _LOOPBACK_HOSTS:
         raise HTTPException(status_code=403, detail="settings are local-only")
+
+
+def require_api_key_for_nonlocal(settings: Settings, bind_host: str) -> None:
+    """Fail closed: refuse to serve a network-exposed API without an API key.
+
+    Loopback binds (127.0.0.1 / ::1 / localhost) stay open for local/dev use; any
+    other bind (0.0.0.0, a LAN/public IP) MUST set ``api_key`` or we raise. Callers
+    pass the ACTUAL bind host: ``create_app`` passes ``settings.app_host`` (the
+    desktop/factory bind); the CLI ``serve`` passes its ``--host`` arg; the deployed
+    entrypoints (fast_api_app / web_app) require a key unconditionally.
+    """
+    host = _hostname(bind_host) or bind_host
+    if host in _LOOPBACK_HOSTS or bind_host in _LOOPBACK_IPS:
+        return
+    if not settings.api_key:
+        raise RuntimeError(
+            "Refusing to start: the API is bound to a non-loopback address "
+            f"({bind_host!r}) without API_KEY set. Set API_KEY for any "
+            "network-exposed deployment."
+        )
 
 
 class SettingsPatch(BaseModel):
@@ -104,8 +140,12 @@ def _require_api_key(settings: Settings):
         if not settings.api_key:
             return  # open when unset (local/dev)
         supplied = x_api_key or (authorization or "").removeprefix("Bearer ").strip()
-        # Constant-time compare to avoid leaking the key via response timing.
-        if not hmac.compare_digest(supplied, settings.api_key):
+        # Constant-time compare. Encode to bytes so a non-ASCII header byte
+        # (Starlette decodes headers as latin-1) yields a clean 401, not a 500
+        # from compare_digest raising TypeError on a non-ASCII str.
+        if not hmac.compare_digest(
+            supplied.encode("utf-8"), settings.api_key.encode("utf-8")
+        ):
             raise HTTPException(status_code=401, detail="invalid or missing API key")
 
     return dep
@@ -117,6 +157,28 @@ def _rate_limiter(bucket: TokenBucket):
     def dep() -> None:
         if not bucket.try_acquire():
             raise HTTPException(status_code=429, detail="rate limit exceeded")
+
+    return dep
+
+
+def _require_same_origin_when_open(settings: Settings):
+    """Block cross-origin browser mutations when the API is OPEN (no api_key).
+
+    No-op when ``api_key`` is set (the key is the control and CORS governs the
+    browser). When open (local/dev), a request that carries an ``Origin``/
+    ``Referer`` (i.e. a browser) must have a loopback or allow-listed origin —
+    so a malicious web page can't drive ``POST /api/runs`` against a local
+    instance (CSRF). Requests without an Origin/Referer (CLI, server-to-server)
+    pass: CSRF is a browser-only attack and they carry no ambient credential.
+    """
+    allowed_hosts = {_hostname(o) for o in settings.allow_origins} | _LOOPBACK_HOSTS
+
+    def dep(request: Request) -> None:
+        if settings.api_key:
+            return
+        ref = request.headers.get("origin") or request.headers.get("referer")
+        if ref and _hostname(ref) not in allowed_hosts:
+            raise HTTPException(status_code=403, detail="cross-origin request blocked")
 
     return dep
 
@@ -147,6 +209,7 @@ def register_product_routes(
     )
     require_api_key = Depends(_require_api_key(settings))
     rate_limit = Depends(_rate_limiter(rate_bucket))
+    require_same_origin = Depends(_require_same_origin_when_open(settings))
 
     if not settings.api_key:
         logger.warning(
@@ -165,9 +228,11 @@ def register_product_routes(
     def health() -> dict[str, str]:
         return {"status": "ok", "app": APP_MARKER, "version": APP_VERSION}
 
-    # Local desktop Settings surface. Local-only (no api_key needed): the write
-    # guard restricts both routes to loopback/same-origin callers.
-    @api.get("/settings", dependencies=[require_local])
+    # Local desktop Settings surface. The write guard restricts both routes to
+    # loopback/same-origin callers; we ALSO require the API key when one is set
+    # (no-op locally) so a forged proxy header can't reach this secret writer
+    # keyless on a network-exposed deploy.
+    @api.get("/settings", dependencies=[require_local, require_api_key])
     def get_settings() -> dict[str, object]:
         # Non-secret only: the key value is NEVER returned, just whether one is set.
         # shadowed_keys warns the UI when a root .env overrides app/.env so a save
@@ -179,7 +244,7 @@ def register_product_routes(
             "shadowed_keys": detect_env_shadow(REPO_ROOT),
         }
 
-    @api.put("/settings", dependencies=[require_local])
+    @api.put("/settings", dependencies=[require_local, require_api_key])
     def put_settings(body: SettingsPatch) -> dict[str, list[str]]:
         # python-dotenv interpolates ${VAR}/$VAR on load regardless of quoting, so a
         # '$' in the stored key would corrupt it on the next launch — reject it.
@@ -232,7 +297,7 @@ def register_product_routes(
     @api.get("/runs", dependencies=[require_api_key])
     def list_runs(
         limit: int = Query(50, ge=1, le=200),
-        offset: int = Query(0, ge=0),
+        offset: int = Query(0, ge=0, le=100_000),
     ):
         return storage().list_runs(limit=limit, offset=offset)
 
@@ -242,12 +307,12 @@ def register_product_routes(
         run = st.get_run(run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="run not found")
-        return RunDetail(run=run, items=st.get_items_for_run(run_id))
+        return RunDetail(run=run, items=st.get_items_for_run(run_id)[:_RUN_ITEMS_CAP])
 
     @api.get("/news", dependencies=[require_api_key])
     def list_news(category: Category | None = None, importance: Importance | None = None,
                   limit: int = Query(50, ge=1, le=200),
-                  offset: int = Query(0, ge=0)):
+                  offset: int = Query(0, ge=0, le=100_000)):
         return storage().list_news(
             category=category, importance=importance, limit=limit, offset=offset
         )
@@ -256,8 +321,8 @@ def register_product_routes(
     def get_sources():
         return load_sources(settings.config_dir)
 
-    @api.put("/sources", dependencies=[require_api_key])
-    def put_sources(sources: list[SourceConfig]):
+    @api.put("/sources", dependencies=[require_api_key, require_same_origin])
+    def put_sources(sources: Annotated[list[SourceConfig], Body(max_length=1000)]):
         config_store.write_sources(settings.config_dir, sources)
         return {"status": "ok", "count": len(sources)}
 
@@ -265,12 +330,13 @@ def register_product_routes(
     def get_watchlist() -> Watchlist:
         return load_watchlist(settings.config_dir)
 
-    @api.put("/watchlist", dependencies=[require_api_key])
+    @api.put("/watchlist", dependencies=[require_api_key, require_same_origin])
     def put_watchlist(watchlist: Watchlist):
         config_store.write_watchlist(settings.config_dir, watchlist)
         return {"status": "ok"}
 
-    @api.post("/runs", status_code=202, dependencies=[require_api_key, rate_limit])
+    @api.post("/runs", status_code=202,
+              dependencies=[require_api_key, require_same_origin, rate_limit])
     def trigger_run():
         # Single-flight (shared with the scheduler via app.run_trigger): reject
         # with 409 if a run is already in progress so we don't fan out concurrent
@@ -281,7 +347,7 @@ def register_product_routes(
         return {"status": "started", "run_id": run_id}
 
     @api.post("/sources/resolve", response_model=ResolveOut,
-              dependencies=[require_api_key, rate_limit])
+              dependencies=[require_api_key, require_same_origin, rate_limit])
     def resolve_source(body: ResolveIn) -> ResolveOut:
         if body.type == "youtube":
             try:
@@ -291,7 +357,7 @@ def register_product_routes(
             except Exception as exc:
                 # Log the real cause server-side; return a generic message so we
                 # don't leak internals (e.g. SSRF target addresses) to clients.
-                logger.warning("youtube resolve failed for %r: %s", body.url, exc)
+                logger.warning("youtube resolve failed for %s: %s", _loggable_url(body.url), exc)
                 raise HTTPException(status_code=400, detail="could not resolve source") from exc
             if not cid:
                 raise HTTPException(status_code=422, detail="Could not resolve a YouTube channel from that link")
@@ -302,7 +368,7 @@ def register_product_routes(
             except HTTPException:
                 raise
             except Exception as exc:
-                logger.warning("rss discover failed for %r: %s", body.url, exc)
+                logger.warning("rss discover failed for %s: %s", _loggable_url(body.url), exc)
                 raise HTTPException(status_code=400, detail="could not resolve source") from exc
             if not feed:
                 raise HTTPException(status_code=422, detail="No RSS feed found at that URL")
@@ -322,6 +388,9 @@ def create_app(
 ) -> FastAPI:
     """Standalone product API (run by ``catchup serve``)."""
     settings = settings or Settings()
+
+    # Fail closed if the configured bind is network-exposed without an API key.
+    require_api_key_for_nonlocal(settings, settings.app_host)
 
     # A stray root .env silently overrides app/.env (pydantic env_file precedence),
     # which would make UI/Settings key-saves to app/.env look ignored. Warn loudly.

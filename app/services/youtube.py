@@ -198,7 +198,6 @@ def build_youtube_summary_agent(model: str):
         model=model,
         instruction=_PROMPT,
         output_schema=DigestNarrative,
-        output_key="youtube_summary",
     )
 
 
@@ -263,10 +262,17 @@ def collect(
         if storage is not None and item_id in storage.existing_ids([item_id]):
             continue
 
-        t = transcript_fn(video.video_id)
-        if t:
-            excerpt: str | None = summarize(t, settings)
-        else:
+        # Isolate per-video failures: one bad transcript/summary must not drop
+        # EVERY video from this channel for the run (it would propagate to the
+        # source-level boundary). Fall back to the description for that video.
+        excerpt: str | None
+        try:
+            t = transcript_fn(video.video_id)
+            excerpt = summarize(t, settings) if t else (video.description or None)
+        except Exception as exc:
+            log.warning(
+                "youtube transcript/summary failed for %s: %s", video.video_id, exc
+            )
             excerpt = video.description or None
 
         items.append(RawItem(

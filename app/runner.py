@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,18 +15,11 @@ from google.adk.sessions import (
 from google.genai import types
 
 from app.adapters.storage.sqlite_backend import SqliteBackend
-from app.core.config import Settings, SourceConfig
-from app.core.domain import (
-    DigestRun,
-    NewsItem,
-    RawItem,
-    RunStatus,
-    SourceType,
-)
+from app.core.config import Settings
+from app.core.domain import DigestRun, RunStatus
 from app.core.ports.storage import StorageBackend
-from app.pipeline import critic as critic_module
-from app.pipeline import digest_editor, processing
-from app.services import (  # noqa: F401 — monkeypatch targets
+from app.pipeline.agents import build_pipeline
+from app.services import (  # noqa: F401 — monkeypatch targets (runner.rss etc.)
     newsapi,
     normalize,
     rss,
@@ -49,17 +43,32 @@ def _firestore_client(settings: Settings):
     return firestore.Client(project=settings.google_cloud_project or None)
 
 
+# Cache one Firestore backend (and its client) per project per process: the API
+# calls build_storage() on every request, and constructing a real
+# firestore.Client each time is expensive. SQLite stays per-call (cheap).
+_firestore_cache: dict[tuple[str, str], StorageBackend] = {}
+_firestore_cache_lock = threading.Lock()
+
+
 def build_storage(settings: Settings) -> StorageBackend:
     backend = settings.storage_backend
     if backend == "sqlite":
         store: StorageBackend = SqliteBackend(settings.sqlite_path)
-    elif backend == "firestore":
-        from app.adapters.storage.firestore_backend import FirestoreBackend
-        store = FirestoreBackend(_firestore_client(settings))
-    else:
-        raise ValueError(f"unknown storage_backend: {backend!r}")
-    store.init_schema()
-    return store
+        store.init_schema()
+        return store
+    if backend == "firestore":
+        key = ("firestore", settings.google_cloud_project)
+        cached = _firestore_cache.get(key)
+        if cached is None:
+            with _firestore_cache_lock:  # double-checked: avoid a concurrent double-build
+                cached = _firestore_cache.get(key)
+                if cached is None:
+                    from app.adapters.storage.firestore_backend import FirestoreBackend
+                    cached = FirestoreBackend(_firestore_client(settings))
+                    cached.init_schema()
+                    _firestore_cache[key] = cached
+        return cached
+    raise ValueError(f"unknown storage_backend: {backend!r}")
 
 
 def _resolve_session_db_url(settings: Settings) -> str:
@@ -76,41 +85,6 @@ def make_session_service(settings: Settings) -> BaseSessionService:
     if settings.session_backend == "memory":
         return InMemorySessionService()
     return DatabaseSessionService(db_url=_resolve_session_db_url(settings))
-
-
-def _collect(source: SourceConfig, settings: Settings, storage: StorageBackend | None = None) -> list[RawItem]:
-    if source.type == SourceType.RSS:
-        return rss.collect(source)
-    if source.type == SourceType.API:
-        return newsapi.collect(source, settings.gnews_api_key)
-    if source.type == SourceType.SCRAPE:
-        return scrape.collect(source)
-    if source.type == SourceType.SEARCH:
-        return search.collect(source, settings)
-    if source.type == SourceType.YOUTUBE:
-        return youtube.collect(source, settings, storage=storage)
-    return []
-
-
-def _default_processor(settings: Settings):
-    return lambda items: processing.adk_enrich(items, settings)
-
-
-def _default_narrator(settings: Settings):
-    return lambda items: digest_editor.adk_narrate(items, settings)
-
-
-def _default_critic(settings: Settings):
-    return lambda items: critic_module.adk_critique(items, settings)
-
-
-def _default_reprocessor(settings: Settings):
-    return lambda items, verdicts: processing.adk_reprocess(items, verdicts, settings)
-
-
-def select_rendered(items: list[NewsItem]) -> list[NewsItem]:
-    """Select items to render: processed items, or all non-flagged if none processed."""
-    return [i for i in items if i.status == "processed"] or [i for i in items if i.status != "flagged"]
 
 
 async def _run_tree(tree, run_id: str, session_service) -> None:
@@ -153,10 +127,6 @@ def run_digest(
     *,
     run_id: str | None = None,
 ) -> DigestRun:
-    # Deferred: app.pipeline.agents imports this module at top level, so
-    # importing it here at module scope would reintroduce a load-time cycle.
-    from app.pipeline.agents import build_pipeline
-
     settings = settings or Settings()
     storage = storage or build_storage(settings)
     # Caller (e.g. POST /api/runs) may inject the run_id so it can be returned
@@ -164,7 +134,6 @@ def run_digest(
     run_id = run_id or uuid.uuid4().hex[:12]
     tree = build_pipeline(
         settings, storage,
-        run_id=run_id,
         processor=processor,
         narrator=narrator,
         critic=critic,

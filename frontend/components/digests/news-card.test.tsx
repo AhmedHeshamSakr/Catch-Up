@@ -7,8 +7,6 @@ import type { NewsItem } from "@/lib/types";
 function makeItem(overrides: Partial<NewsItem> = {}): NewsItem {
   return {
     id: "1",
-    org_id: "o",
-    user_id: "u",
     source_id: "s",
     source_type: "rss",
     source_name: "Acme News",
@@ -27,7 +25,6 @@ function makeItem(overrides: Partial<NewsItem> = {}): NewsItem {
       { name: "Qatar", type: "place" },
     ],
     sentiment: "positive",
-    language: "en",
     status: "ok",
     digest_run_id: null,
     ...overrides,

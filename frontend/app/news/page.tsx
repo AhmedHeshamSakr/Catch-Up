@@ -145,7 +145,7 @@ export default function NewsPage() {
         isEmpty={!!data && data.length === 0}
         onRetry={() => mutate()}
         errorTitle="Couldn't load news"
-        errorDescription="Is the API running on :8000?"
+        errorDescription="Is the API reachable?"
         skeleton={
           <div className="flex flex-col gap-3">
             {Array.from({ length: 5 }).map((_, i) => (

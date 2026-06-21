@@ -15,7 +15,7 @@ How this project uses the **Google Agent Development Kit (ADK)**: which ADK piec
 | `BaseAgent` (custom) | `from google.adk.agents import BaseAgent` | The 7 pipeline-stage wrappers in `app/pipeline/agents.py` (thin shells over our Python functions). |
 | `SequentialAgent` | `from google.adk.agents import SequentialAgent` | The root `NewsCatchUpPipeline` — runs stages in order, sharing session state. |
 | `ParallelAgent` | `from google.adk.agents import ParallelAgent` | `CollectSources` — runs the 5 source collectors concurrently. |
-| `App` | `from google.adk.apps import App` | `app/agent.py` exposes `app = App(root_agent=..., name="app")` for `adk run`/`adk web`. |
+| `App` | `from google.adk.apps import App` | `app/agent.py` builds `app`/`root_agent` **lazily** (module `__getattr__`, no import-time I/O) for `adk run`/`adk web`. |
 | `Runner` / `run_async` | `from google.adk.runners import Runner` | `run_digest` drives the tree via `Runner` + a persistent `DatabaseSessionService`. Single LLM-agent calls (`llm/runtime.run_agent_text`, search) keep `InMemoryRunner`. |
 | `Session` / `ctx.session.state` | (via `InvocationContext`) | Carries data between stages; written via `state_delta`, never direct mutation. |
 | `Event` / `EventActions` | `from google.adk.events import Event, EventActions` | Each `BaseAgent` yields a terminal `Event` carrying its `EventActions.state_delta`. |
@@ -53,7 +53,7 @@ NewsCatchUpPipeline               (SequentialAgent)              app/pipeline/ag
 
 ## 3. The LLM agents
 
-Structured-output agents use `Agent(model=settings.llm_model, instruction=<prompt>, output_schema=<Pydantic>, output_key=...)`, run via `llm.runtime.run_agent_text`, and are validated with `Model.model_validate_json`. `search_collector` is the tool-only exception (`tools=[google_search]`, no `output_schema`).
+Structured-output agents use `Agent(model=settings.llm_model, instruction=<prompt>, output_schema=<Pydantic>)`, run via `llm.runtime.run_agent_text`, and are validated by parsing the returned text with `Model.model_validate_json` (`output_key` was removed — the pipeline reads the agent's text output, not session state). `search_collector` is the tool-only exception (`tools=[google_search]`, no `output_schema`).
 
 | Agent | File | Prompt | `output_schema` | Role |
 |---|---|---|---|---|
@@ -76,7 +76,7 @@ The critic and judge **share one rubric** — `app/prompts/faithfulness_rubric.m
 def run_digest(settings=None, storage=None, processor=None, narrator=None, critic=None) -> DigestRun:
     settings = settings or Settings(); storage = storage or build_storage(settings)
     run_id = uuid.uuid4().hex[:12]
-    tree = build_pipeline(settings, storage, run_id=run_id, processor=processor, narrator=narrator, critic=critic)
+    tree = build_pipeline(settings, storage, processor=processor, narrator=narrator, critic=critic)  # run_id seeded via session state
     session_service = make_session_service(settings)   # "database" (default) → DatabaseSessionService; "memory" → InMemory
     try:
         asyncio.run(_run_and_close())                  # run the ADK tree, then dispose the session DB engine
@@ -141,7 +141,7 @@ class NormalizeDedupAgent(BaseAgent):
 ```
 
 ### d) Exposure to `adk run` / `adk web`
-`app/agent.py` exports `app = App(root_agent=build_pipeline(...), name="app")`. The ADK loader (and `agents-cli-manifest.yaml`'s `agent_directory: "app"`) resolves the `app` attribute first, so `adk run app` / `adk web` drive the **real** `NewsCatchUpPipeline`. (`App.name` stays `"app"`; the tree's root agent is named `NewsCatchUpPipeline`.)
+`app/agent.py` builds `app = App(root_agent=build_pipeline(...), name="app")` **lazily** via module `__getattr__` (so importing the package does no I/O — built once, cached under a lock). The ADK loader (and `agents-cli-manifest.yaml`'s `agent_directory: "app"`) resolves the `app` attribute first, so `adk run app` / `adk web` drive the **real** `NewsCatchUpPipeline`. (`App.name` stays `"app"`; the tree's root agent is named `NewsCatchUpPipeline`.)
 
 ---
 
@@ -162,7 +162,7 @@ Tests inject fakes (synthetic Pydantic results / fixtures), so the **full suite 
     --schedule="0 7 * * *" --time-zone="UTC" \
     --uri="https://<host>/api/runs" --http-method=POST --headers="X-API-Key=<key>"
   ```
-- **Deploy:** the milestone target is local/self-hosted; the `App` (Agent Engine / Cloud Run) path is future. No pipeline rewrite — all swap-points are behind interfaces.
+- **Deploy:** three paths (see README "Deployment") — local desktop, the Cloud Run **product** image (`app/web_app.py`: console + `/api`), and ADK **Agent Engine** (`app/fast_api_app.py`, behind Cloud Run IAM/IAP). No pipeline rewrite — storage swaps behind its port; LLM/scheduler swap via env toggle / `POST /api/runs`.
 
 ---
 

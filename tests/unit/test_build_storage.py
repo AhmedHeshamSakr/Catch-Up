@@ -14,10 +14,31 @@ def test_build_storage_sqlite_default(tmp_path):
 
 def test_build_storage_firestore(monkeypatch, tmp_path):
     import app.runner as runner_mod
+    runner_mod._firestore_cache.clear()
     monkeypatch.setattr(runner_mod, "_firestore_client", lambda settings: FakeFirestoreClient())
     s = Settings(_env_file=None, storage_backend="firestore",
                  sqlite_path=str(tmp_path / "c.db"))
     assert isinstance(build_storage(s), FirestoreBackend)
+    runner_mod._firestore_cache.clear()
+
+
+def test_build_storage_caches_firestore_backend(monkeypatch, tmp_path):
+    import app.runner as runner_mod
+    runner_mod._firestore_cache.clear()
+    calls = {"n": 0}
+
+    def fake_client(settings):
+        calls["n"] += 1
+        return FakeFirestoreClient()
+
+    monkeypatch.setattr(runner_mod, "_firestore_client", fake_client)
+    s = Settings(_env_file=None, storage_backend="firestore",
+                 sqlite_path=str(tmp_path / "c.db"))
+    first = build_storage(s)
+    second = build_storage(s)
+    assert first is second  # same backend instance reused
+    assert calls["n"] == 1  # the Firestore client was built only once
+    runner_mod._firestore_cache.clear()
 
 
 def test_build_storage_unknown_backend(tmp_path):

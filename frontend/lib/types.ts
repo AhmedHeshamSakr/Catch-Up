@@ -8,8 +8,6 @@ export interface Entity { name: string; type: string; }
 
 export interface NewsItem {
   id: string;
-  org_id: string;
-  user_id: string;
   source_id: string;
   source_type: SourceType;
   source_name: string;
@@ -25,7 +23,6 @@ export interface NewsItem {
   importance_score: number | null;
   entities: Entity[];
   sentiment: Sentiment | null;
-  language: string | null;
   status: string;
   digest_run_id: string | null;
   image_url?: string | null;
@@ -33,7 +30,6 @@ export interface NewsItem {
 
 export interface DigestRun {
   run_id: string;
-  org_id: string;
   started_at: string;
   finished_at: string | null;
   status: RunStatus;

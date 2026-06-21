@@ -1,14 +1,18 @@
 """Firestore StorageBackend adapter (optional [firestore] extra).
 
 Takes an injectable client so the same code runs against a real
-google.cloud.firestore.Client (prod) and an in-memory fake (tests). Queries use
-positional where(field, op, value) and order_by(field, "DESCENDING") so no
-google.cloud import is needed at adapter scope. (Real Firestore deprecates
-positional where in favor of FieldFilter; swap that during emulator validation
-before any real deploy — see tests/integration/test_firestore_emulator.py.)
-Flagged-exclusion uses a derived is_flagged boolean (equality), because the
-backing store can't combine an inequality filter with an order_by on a
-different field.
+google.cloud.firestore.Client (prod) and an in-memory fake (tests). Filtered
+queries go through ``_where``, which uses the non-deprecated ``FieldFilter``
+when google-cloud-firestore is importable (real backend) and falls back to the
+positional ``where(field, op, value)`` form for the in-memory fake (which has no
+FieldFilter). order_by uses "DESCENDING".
+
+Flagged-exclusion uses a derived ``is_flagged`` boolean (equality), because the
+backing store can't combine an inequality filter with an order_by on a different
+field; ``backfill_is_flagged`` sets it on any legacy doc that predates the field
+(a missing field does NOT match ``== False`` in real Firestore — unlike SQLite's
+NULL handling). Production also needs the composite indexes in
+``firestore.indexes.json``; the emulator builds them on the fly.
 """
 from __future__ import annotations
 
@@ -17,6 +21,16 @@ from app.core.ports.storage import StorageBackend
 
 _DESC = "DESCENDING"  # equals google.cloud.firestore.Query.DESCENDING
 _BATCH_LIMIT = 500    # batch-write cap
+
+
+def _where(query, field: str, op: str, value):
+    """Apply a filter, preferring the non-deprecated FieldFilter when
+    google-cloud-firestore is installed (real backend); else positional (fake)."""
+    try:
+        from google.cloud.firestore_v1.base_query import FieldFilter
+    except ImportError:
+        return query.where(field, op, value)
+    return query.where(filter=FieldFilter(field, op, value))
 
 
 class FirestoreBackend(StorageBackend):
@@ -41,7 +55,9 @@ class FirestoreBackend(StorageBackend):
         if not ids:
             return set()
         col = self._items()
-        return {i for i in ids if col.document(i).get().exists}
+        # One batched read instead of one get() per id (was O(N) round-trips).
+        snaps = self._client.get_all([col.document(i) for i in ids])
+        return {s.id for s in snaps if s.exists}
 
     @staticmethod
     def _item_doc(item: NewsItem) -> dict:
@@ -62,9 +78,9 @@ class FirestoreBackend(StorageBackend):
     def get_items_for_run(
         self, run_id: str, *, include_flagged: bool = False
     ) -> list[NewsItem]:
-        q = self._items().where("digest_run_id", "==", run_id)
+        q = _where(self._items(), "digest_run_id", "==", run_id)
         if not include_flagged:
-            q = q.where("is_flagged", "==", False)
+            q = _where(q, "is_flagged", "==", False)
         return [NewsItem.model_validate(s.to_dict()) for s in q.stream()]
 
     def create_run(self, run: DigestRun) -> None:
@@ -78,6 +94,9 @@ class FirestoreBackend(StorageBackend):
         return DigestRun.model_validate(snap.to_dict()) if snap.exists else None
 
     def list_runs(self, limit: int = 20, offset: int = 0) -> list[DigestRun]:
+        # NOTE: Firestore .offset() READS (and BILLS) every skipped doc, so deep
+        # pagination scales linearly in cost/latency. Fine at this volume; switch
+        # to cursor pagination (start_after) before high-volume production use.
         q = self._runs().order_by("started_at", _DESC).offset(offset).limit(limit)
         return [DigestRun.model_validate(s.to_dict()) for s in q.stream()]
 
@@ -87,10 +106,36 @@ class FirestoreBackend(StorageBackend):
     ) -> list[NewsItem]:
         q = self._items()
         if category is not None:
-            q = q.where("category", "==", category.value)
+            q = _where(q, "category", "==", category.value)
         if importance is not None:
-            q = q.where("importance", "==", importance.value)
+            q = _where(q, "importance", "==", importance.value)
         if not include_flagged:
-            q = q.where("is_flagged", "==", False)
+            q = _where(q, "is_flagged", "==", False)
         q = q.order_by("collected_at", _DESC).offset(offset).limit(limit)
         return [NewsItem.model_validate(s.to_dict()) for s in q.stream()]
+
+    def backfill_is_flagged(self) -> int:
+        """One-time migration: set ``is_flagged`` on item docs missing it.
+
+        Real Firestore's ``is_flagged == False`` filter does NOT match a missing
+        field, so legacy docs written before the field existed would silently drop
+        out of default queries. Scan all item docs and set it where absent, deriving
+        the value from the stored ``status`` (a flagged legacy doc must STAY hidden —
+        hardcoding ``False`` would un-flag it and leak it into default reads).
+        Returns the number of docs updated. (New writes always set it; see
+        ``_item_doc``.) Intended as a one-time migration on a quiescent
+        collection — for very large collections, page by document id (a single
+        ``stream()`` has an RPC time limit).
+        """
+        col = self._items()
+        updated = 0
+        for snap in col.stream():
+            data = snap.to_dict() or {}
+            if "is_flagged" not in data:
+                # update() merges ONLY this field — set({**data,...}) would rewrite
+                # the whole doc and could clobber a concurrent change.
+                col.document(snap.id).update(
+                    {"is_flagged": data.get("status") == "flagged"}
+                )
+                updated += 1
+        return updated

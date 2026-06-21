@@ -22,7 +22,6 @@ def test_newsitem_from_raw_sets_id_category_and_status():
     assert item.category == Category.AI_TECH
     assert item.status == "raw"
     assert item.digest_run_id == "r1"
-    assert item.org_id == "default"
 
 
 def test_newsitem_from_raw_copies_image_url():

@@ -12,15 +12,42 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
 
-import uuid
-
-from google.adk.apps import App
+import threading
 
 from app.core.config import Settings
-from app.pipeline.agents import build_pipeline
-from app.runner import build_storage
 
-_settings = Settings()
-root_agent = build_pipeline(_settings, build_storage(_settings), run_id=uuid.uuid4().hex[:12])
-app = App(root_agent=root_agent, name="app")
+_build_lock = threading.Lock()
+
+
+def build_app():
+    """Construct the ADK App lazily (no DB creation / disk writes at import time).
+
+    Building the pipeline calls build_storage(), which opens/migrates the SQLite
+    file. Doing that at import would create data/catchup.db merely by importing
+    any app.* module (breaks read-only FS, pollutes test collection). ADK's
+    AgentLoader accesses ``app``/``root_agent`` via hasattr(), which triggers the
+    module ``__getattr__`` below — so the App is built on first real access.
+    """
+    from google.adk.apps import App
+
+    from app.pipeline.agents import build_pipeline
+    from app.runner import build_storage
+
+    settings = Settings()
+    return App(root_agent=build_pipeline(settings, build_storage(settings)), name="app")
+
+
+def __getattr__(name: str):
+    if name in ("app", "root_agent"):
+        # Build ONCE and cache BOTH names from the same App, so app.root_agent IS
+        # root_agent (ADK probes both via hasattr). Locked to avoid a double-build
+        # race on concurrent first access.
+        with _build_lock:
+            if "app" not in globals():
+                built = build_app()
+                globals()["app"] = built
+                globals()["root_agent"] = built.root_agent
+        return globals()[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

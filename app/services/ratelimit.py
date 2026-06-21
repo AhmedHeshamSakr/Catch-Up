@@ -15,6 +15,13 @@ class TokenBucket:
         *,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
+        # Reject degenerate config. rate_per_sec == 0 is allowed (a fixed budget:
+        # allow `capacity` then deny, no refill); only a NEGATIVE rate or a sub-1
+        # capacity (can't admit even one request) is nonsensical.
+        if rate_per_sec < 0:
+            raise ValueError("rate_per_sec must be >= 0")
+        if capacity < 1:
+            raise ValueError("capacity must be >= 1")
         self.rate = rate_per_sec
         self.capacity = capacity
         self._tokens = float(capacity)

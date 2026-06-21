@@ -1,18 +1,28 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.domain import NewsItem
 
 BOOST = 0.25
 
+# Bound the lists so an over-large PUT /watchlist body can't blow up parsing /
+# matching cost (each item is also length-capped).
+_MAX_TERMS = 1000
+_MAX_TERM_LEN = 200
+
 
 class Watchlist(BaseModel):
-    entities: list[str] = []
-    keywords: list[str] = []
+    entities: list[Annotated[str, Field(max_length=_MAX_TERM_LEN)]] = Field(
+        default=[], max_length=_MAX_TERMS
+    )
+    keywords: list[Annotated[str, Field(max_length=_MAX_TERM_LEN)]] = Field(
+        default=[], max_length=_MAX_TERMS
+    )
 
     @property
     def entities_lower(self) -> set[str]:

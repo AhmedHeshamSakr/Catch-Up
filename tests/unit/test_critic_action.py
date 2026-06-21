@@ -44,14 +44,15 @@ def test_faithful_verdict_leaves_item_untouched():
     assert outcome["flagged"] == 0
 
 
-def test_no_verdict_leaves_item_untouched():
+def test_no_verdict_fails_closed():
+    """A selected item with NO verdict must FAIL CLOSED (flagged), not ship
+    unchecked: the critic returned an incomplete response and these items were
+    deliberately selected because they are high-risk."""
     item = _item("https://a.com/2", "News 2", score=0.9)
-    original_score = item.importance_score
     # Pass an empty verdicts list — item has no verdict
     outcome = apply_verdicts([item], [], "flag", THRESHOLD)
-    assert item.status == "processed"
-    assert item.importance_score == original_score
-    assert outcome["flagged"] == 0
+    assert item.status == "flagged"
+    assert outcome["flagged"] == 1
 
 
 def test_flag_action_sets_status_flagged():

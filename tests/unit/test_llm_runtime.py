@@ -70,6 +70,61 @@ def test_run_agent_text_retries_on_timeout_then_raises(monkeypatch):
     assert calls["n"] == 1 + s.llm_max_retries  # one initial + retries
 
 
+def test_run_agent_text_fails_fast_on_permanent_4xx(monkeypatch):
+    """A 4xx (auth/not-found/invalid) error must NOT be retried — one attempt only."""
+    calls = {"n": 0}
+
+    class _ClientError(Exception):
+        code = 404
+
+    async def not_found(agent, payload, *, app_name="catchup", timeout=None):
+        calls["n"] += 1
+        raise _ClientError("model not found")
+
+    monkeypatch.setattr(runtime, "_run_text_async", not_found)
+    monkeypatch.setattr(runtime.time, "sleep", lambda _s: None)
+
+    with pytest.raises(_ClientError):
+        runtime.run_agent_text(object(), "payload", _fast_settings(google_api_key="x"))
+    assert calls["n"] == 1  # failed fast, no retries
+
+
+def test_run_agent_text_fails_fast_on_value_error(monkeypatch):
+    """Config/validation errors won't fix on retry → one attempt only."""
+    calls = {"n": 0}
+
+    async def bad_config(agent, payload, *, app_name="catchup", timeout=None):
+        calls["n"] += 1
+        raise ValueError("bad config")
+
+    monkeypatch.setattr(runtime, "_run_text_async", bad_config)
+    monkeypatch.setattr(runtime.time, "sleep", lambda _s: None)
+
+    with pytest.raises(ValueError):
+        runtime.run_agent_text(object(), "payload", _fast_settings(google_api_key="x"))
+    assert calls["n"] == 1
+
+
+def test_run_agent_text_retries_on_5xx(monkeypatch):
+    """A 503 IS transient → retried up to the limit."""
+    calls = {"n": 0}
+
+    class _ServerError(Exception):
+        code = 503
+
+    async def unavailable(agent, payload, *, app_name="catchup", timeout=None):
+        calls["n"] += 1
+        raise _ServerError("unavailable")
+
+    monkeypatch.setattr(runtime, "_run_text_async", unavailable)
+    monkeypatch.setattr(runtime.time, "sleep", lambda _s: None)
+
+    s = _fast_settings(google_api_key="x")
+    with pytest.raises(_ServerError):
+        runtime.run_agent_text(object(), "payload", s)
+    assert calls["n"] == 1 + s.llm_max_retries
+
+
 def test_run_text_async_applies_timeout(monkeypatch):
     # Exercise the real wait_for path inside _run_text_async (no monkeypatch of it).
     import app.llm.runtime as rt

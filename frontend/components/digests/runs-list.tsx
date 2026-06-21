@@ -85,8 +85,16 @@ export function RunsList() {
                   {runs.map((run) => (
                     <TableRow
                       key={run.run_id}
-                      onClick={() => router.push(`/digests?run=${run.run_id}`)}
-                      className="group cursor-pointer hover:bg-muted/40"
+                      role="link"
+                      tabIndex={0}
+                      onClick={() => router.push(`/digests?run=${encodeURIComponent(run.run_id)}`)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          router.push(`/digests?run=${encodeURIComponent(run.run_id)}`);
+                        }
+                      }}
+                      className="group cursor-pointer hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <TableCell className="pl-4 font-mono tabular-nums text-xs text-foreground group-hover:text-cyan transition-colors">
                         {formatDateTime(run.started_at)}
@@ -111,7 +119,7 @@ export function RunsList() {
                       </TableCell>
                       <TableCell className="pr-4">
                         <Link
-                          href={`/digests?run=${run.run_id}`}
+                          href={`/digests?run=${encodeURIComponent(run.run_id)}`}
                           aria-label={`View run started ${formatDateTime(run.started_at)}`}
                           onClick={(e) => e.stopPropagation()}
                           className="flex items-center justify-center text-muted-foreground/40 group-hover:text-muted-foreground transition-colors"

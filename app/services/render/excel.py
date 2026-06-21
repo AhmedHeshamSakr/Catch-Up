@@ -18,20 +18,30 @@ _WIDTHS = [18, 50, 60, 60, 20, 18, 40, 12, 30, 12]
 _HEADER_FILL = PatternFill("solid", fgColor="0F172A")
 _HEADER_FONT = Font(bold=True, color="FFFFFF")
 
+# Excel/Sheets interpret a cell starting with any of these as a formula → CSV/
+# formula injection. We prefix a leading apostrophe to force plain text.
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _safe_cell(value: str) -> str:
+    if value and value[0] in _FORMULA_PREFIXES:
+        return "'" + value
+    return value
+
 
 def _row(item: NewsItem) -> list[str]:
     when = item.published_at or item.collected_at
     category = CATEGORY_TITLES.get(item.category, "Uncategorized") if item.category else "Uncategorized"
     return [
         when.strftime("%Y-%m-%d %H:%M") if when else "",
-        item.title,
-        item.summary_en or "",
-        item.summary_ar or "",
+        _safe_cell(item.title),
+        _safe_cell(item.summary_en or ""),
+        _safe_cell(item.summary_ar or ""),
         category,
-        item.source_name,
-        item.url,
+        _safe_cell(item.source_name),
+        _safe_cell(item.url),
         item.importance.value.upper() if item.importance else "",
-        ", ".join(e.name for e in item.entities),
+        _safe_cell(", ".join(e.name for e in item.entities)),
         item.sentiment.value if item.sentiment else "",
     ]
 

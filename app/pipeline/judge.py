@@ -31,7 +31,6 @@ def build_judge_agent(model: str, temperature: float = 0.0) -> Agent:
         model=model,
         instruction=_JUDGE_PROMPT,
         output_schema=EnrichmentVerdicts,
-        output_key="verdicts",
         generate_content_config=types.GenerateContentConfig(temperature=temperature),
     )
 

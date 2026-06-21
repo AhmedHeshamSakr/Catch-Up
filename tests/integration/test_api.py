@@ -546,3 +546,90 @@ def test_scheduler_absent_by_default(tmp_path):
     app = create_app(_runs_settings(tmp_path), run_digest_fn=lambda **kw: None)
     with TestClient(app):
         assert app.state.scheduler is None
+
+
+# ---------------------------------------------------------------------------
+# Fail-closed: a non-loopback bind without API_KEY must refuse to start
+# ---------------------------------------------------------------------------
+
+
+def test_require_api_key_for_nonlocal_raises_without_key():
+    from app.api.app import require_api_key_for_nonlocal
+
+    s = Settings(_env_file=None, api_key=None, app_host="0.0.0.0")
+    with pytest.raises(RuntimeError, match="API_KEY"):
+        require_api_key_for_nonlocal(s, s.app_host)
+    # An explicit LAN address is also non-loopback.
+    with pytest.raises(RuntimeError, match="API_KEY"):
+        require_api_key_for_nonlocal(s, "192.168.1.10")
+
+
+def test_require_api_key_for_nonlocal_allows_loopback():
+    from app.api.app import require_api_key_for_nonlocal
+
+    s = Settings(_env_file=None, api_key=None, app_host="127.0.0.1")
+    # None of these raise (loopback identities stay open for local/dev).
+    require_api_key_for_nonlocal(s, "127.0.0.1")
+    require_api_key_for_nonlocal(s, "localhost")
+    require_api_key_for_nonlocal(s, "::1")
+
+
+def test_require_api_key_for_nonlocal_allows_nonlocal_with_key():
+    from app.api.app import require_api_key_for_nonlocal
+
+    s = Settings(_env_file=None, api_key="secret", app_host="0.0.0.0")
+    require_api_key_for_nonlocal(s, s.app_host)  # no raise — key is set
+
+
+def test_create_app_refuses_nonlocal_bind_without_key(tmp_path):
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "sources.yaml").write_text("sources: []\n", encoding="utf-8")
+    (cfg / "watchlist.yaml").write_text("entities: []\nkeywords: []\n", encoding="utf-8")
+    settings = Settings(
+        _env_file=None,
+        sqlite_path=str(tmp_path / "db.sqlite"),
+        config_dir=str(cfg),
+        output_dir=str(tmp_path / "out"),
+        app_host="0.0.0.0",
+        api_key=None,
+    )
+    with pytest.raises(RuntimeError, match="API_KEY"):
+        create_app(settings, run_digest_fn=lambda **kw: None)
+
+
+# ---------------------------------------------------------------------------
+# CSRF: when the API is OPEN (no api_key), block cross-origin mutations
+# ---------------------------------------------------------------------------
+
+
+def test_open_api_blocks_cross_origin_mutation(tmp_path):
+    c = _auth_client(tmp_path, api_key=None)  # open mode
+    src = [{"id": "x", "type": "rss", "name": "X", "url": "https://x/feed", "enabled": True}]
+    evil = {"Origin": "https://evil.example"}
+    assert c.put("/api/sources", json=src, headers=evil).status_code == 403
+    assert c.put("/api/watchlist", json={"entities": [], "keywords": []},
+                 headers=evil).status_code == 403
+    assert c.post("/api/runs", headers=evil).status_code == 403
+    assert c.post("/api/sources/resolve",
+                  json={"type": "youtube", "url": "https://youtube.com/@x"},
+                  headers=evil).status_code == 403
+    # Referer is honored too (some browsers omit Origin on some requests).
+    assert c.post("/api/runs", headers={"Referer": "https://evil.example/page"}).status_code == 403
+
+
+def test_open_api_allows_same_origin_and_no_origin(tmp_path):
+    c = _auth_client(tmp_path, api_key=None)  # open; default allow_origins = localhost:3000
+    src = [{"id": "x", "type": "rss", "name": "X", "url": "https://x/feed", "enabled": True}]
+    # Allow-listed console origin passes.
+    assert c.put("/api/sources", json=src,
+                 headers={"Origin": "http://localhost:3000"}).status_code == 200
+    # No Origin/Referer (CLI, curl, tests) passes — CSRF is browser-only.
+    assert c.post("/api/runs").status_code == 202
+
+
+def test_keyed_api_ignores_origin(tmp_path):
+    # When api_key is set, the key is the control; cross-origin with a valid key is fine.
+    c = _auth_client(tmp_path, api_key="secret")
+    h = {"X-API-Key": "secret", "Origin": "https://evil.example"}
+    assert c.post("/api/runs", headers=h).status_code == 202

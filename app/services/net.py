@@ -59,6 +59,11 @@ def validate_public_url(
         raise UnsafeURLError(f"no addresses resolved for host: {host}")
     for addr in addresses:
         ip = ipaddress.ip_address(addr)
+        # Normalize an IPv4-mapped IPv6 (::ffff:a.b.c.d) to its IPv4 form so the
+        # checks below see the real address, not the mapped wrapper.
+        mapped = getattr(ip, "ipv4_mapped", None)
+        if mapped is not None:
+            ip = mapped
         if (
             ip.is_private
             or ip.is_loopback
@@ -66,6 +71,9 @@ def validate_public_url(
             or ip.is_reserved
             or ip.is_multicast
             or ip.is_unspecified
+            # is_global is the catch-all: it also rejects non-global ranges the
+            # explicit flags miss, notably CGNAT (100.64.0.0/10).
+            or not ip.is_global
         ):
             raise UnsafeURLError(f"{host} resolves to non-public address {ip}")
     return url, addresses[0]
@@ -79,6 +87,7 @@ def safe_get(
     headers: dict[str, str] | None = None,
     params: dict | None = None,
     max_redirects: int = 3,
+    max_bytes: int = 5_000_000,
 ) -> httpx.Response:
     """SSRF-safe HTTP GET: validates the public-ness of EVERY hop AND pins the IP.
 
@@ -122,11 +131,36 @@ def safe_get(
                 "GET", str(pinned), headers=req_headers,
                 params=next_params, extensions=extensions,
             )
-            resp = client.send(request)
-        if resp.is_redirect and resp.headers.get("location"):
-            location = resp.headers["location"]
-            current_url = str(httpx.URL(current_url).join(location))
-            next_params = None
-            continue
-        return resp
+            # Stream so we can abort an oversized body BEFORE pulling it all into
+            # memory — a user-supplied URL returning a multi-GB response from a
+            # legit public host would otherwise OOM the process.
+            resp = client.send(request, stream=True)
+            try:
+                if resp.is_redirect and resp.headers.get("location"):
+                    location = resp.headers["location"]
+                    current_url = str(httpx.URL(current_url).join(location))
+                    next_params = None
+                    continue
+                declared = resp.headers.get("content-length")
+                if declared is not None and declared.isdigit() and int(declared) > max_bytes:
+                    raise UnsafeURLError(
+                        f"response too large: {declared} bytes (> {max_bytes})"
+                    )
+                body = bytearray()
+                # Bound each chunk (64 KiB) so a lying/chunked/decoded (e.g. gzip)
+                # response can't hand us one giant chunk, and check the PROJECTED
+                # size before extending — we never hold more than max_bytes + 64 KiB.
+                for chunk in resp.iter_bytes(chunk_size=65536):
+                    if len(body) + len(chunk) > max_bytes:
+                        raise UnsafeURLError(f"response exceeds {max_bytes} bytes")
+                    body.extend(chunk)
+                # Return a fully-read Response so callers use .text/.json/.content.
+                return httpx.Response(
+                    status_code=resp.status_code,
+                    headers=resp.headers,
+                    content=bytes(body),
+                    request=resp.request,
+                )
+            finally:
+                resp.close()
     raise UnsafeURLError(f"too many redirects (>{max_redirects}) for {url}")

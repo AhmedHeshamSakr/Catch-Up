@@ -45,14 +45,16 @@ sources:
     country: qa
     category_hint: gulf_mena
     enabled: false
-  # Example scrape source — set a real selector before enabling.
-  - id: example_scrape
-    type: scrape
-    name: Example Announcements
-    url: https://example.com/news
-    selector: a.headline
-    category_hint: business_finance
-    enabled: false
+  # Scrape source TEMPLATE (commented out — not a live source). Scrape selectors
+  # are site-specific and brittle, so copy this, point url at a real page, set a
+  # CSS selector you've verified against that page's HTML, then enable it:
+  #   - id: my_scrape
+  #     type: scrape
+  #     name: Some Newspaper — Headlines
+  #     url: https://news.example.org/latest
+  #     selector: "article h3 a"   # verify against the live page
+  #     category_hint: business_finance
+  #     enabled: true
   - id: search-ai-breakthroughs
     type: search
     name: AI Breakthroughs (Search)

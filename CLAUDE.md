@@ -18,7 +18,11 @@ Before writing any code, understand the project's requirements, constraints, and
 Implement agent logic in `app/`. Use `agents-cli playground` for interactive testing. Iterate based on user feedback.
 
 ### Phase 3: The Evaluation Loop (Main Iteration Phase)
-Start with 1-2 eval cases, run `agents-cli eval run`, iterate. Expect 5-10+ iterations. See the **Evaluation Guide** for metrics, evalset schema, LLM-as-judge config, and common gotchas.
+**This project uses a custom enrichment eval harness, NOT `agents-cli eval`** (the
+news pipeline is a batch structured-output agent, not the conversational `root_agent`
+that `agents-cli eval` targets). Run `uv run python scripts/eval_enrichment.py` (offline)
+or `--live`; iterate on the prompts in `app/prompts/`. See **`docs/eval/README.md`** for
+dimensions, thresholds, the LLM-as-judge, and the eval-fix loop.
 
 ### Phase 4: Pre-Deployment Tests
 Run `uv run pytest tests/unit tests/integration`. Fix issues until all tests pass.
@@ -35,7 +39,7 @@ Ask the user: Option A (simple single-project) or Option B (full CI/CD pipeline 
 |---------|---------|
 | `agents-cli playground` | Interactive local testing |
 | `uv run pytest tests/unit tests/integration` | Run unit and integration tests |
-| `agents-cli eval run` | Run evaluation against evalsets |
+| `uv run python scripts/eval_enrichment.py` | Run the **custom** enrichment eval (offline; `--live` hits Gemini). NOT `agents-cli eval`. |
 | `agents-cli lint` | Check code quality |
 | `agents-cli infra single-project` | Set up project infrastructure (Terraform) |
 | `agents-cli deploy` | Deploy to dev |

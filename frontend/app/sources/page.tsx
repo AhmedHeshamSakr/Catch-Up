@@ -137,7 +137,7 @@ export default function SourcesPage() {
         isEmpty={!!sources && sources.length === 0}
         onRetry={() => mutate()}
         errorTitle="Couldn't load sources"
-        errorDescription="Is the API running on :8000?"
+        errorDescription="Is the API reachable?"
         skeleton={<SourcesSkeleton />}
         empty={
           <Card>

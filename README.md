@@ -20,6 +20,39 @@ validated against live GCP**. Design is approved — see
 [`ARCHITECTURE.md`](ARCHITECTURE.md) and the
 [design spec](docs/superpowers/specs/2026-05-23-adk-catchup-agent-design.md).
 
+## Overview deck
+
+A 13-slide visual tour — the problem, the multi-agent pipeline, the architecture
+decisions, and how it was built. **[⬇ Download the PDF](presentation/Catch-Up.pdf)** · [PowerPoint](presentation/Catch-Up.pptx).
+
+[![Catch-Up — News Intelligence Agent (overview deck)](presentation/slides/slide-01.png)](presentation/Catch-Up.pdf)
+
+<details>
+<summary><b>▶  Browse all 13 slides</b></summary>
+
+<br/>
+
+![Slide 1 — Title](presentation/slides/slide-01.png)
+![Slide 2 — The problem](presentation/slides/slide-02.png)
+![Slide 3 — The solution](presentation/slides/slide-03.png)
+![Slide 4 — How it works (pipeline)](presentation/slides/slide-04.png)
+![Slide 5 — The ADK agent tree](presentation/slides/slide-05.png)
+![Slide 6 — What each agent does](presentation/slides/slide-06.png)
+![Slide 7 — Architecture decisions](presentation/slides/slide-07.png)
+![Slide 8 — Collect from everywhere](presentation/slides/slide-08.png)
+![Slide 9 — Rank & summarize with Gemini](presentation/slides/slide-09.png)
+![Slide 10 — A guardrail you can trust](presentation/slides/slide-10.png)
+![Slide 11 — Delivered the way you work](presentation/slides/slide-11.png)
+![Slide 12 — How it was built](presentation/slides/slide-12.png)
+![Slide 13 — Summary](presentation/slides/slide-13.png)
+
+</details>
+
+> Rebuild the deck after editing `presentation/build_deck.py`:
+> `uv run --with python-pptx python presentation/build_deck.py` →
+> `soffice --headless --convert-to pdf --outdir presentation presentation/Catch-Up.pptx` →
+> `pdftoppm -png -r 100 presentation/Catch-Up.pdf presentation/slides/slide`.
+
 ## Features
 
 - **Multi-source collection** — RSS, web **scrape** (CSS selector, SSRF-guarded), **GNews**
@@ -41,12 +74,15 @@ validated against live GCP**. Design is approved — see
 - **Single-port desktop app** — one process serves the built console *and* the API, wrapped in
   a double-clickable macOS `.app` (chromeless window).
 - **Scheduling** — in-process cron via APScheduler, or point Cloud Scheduler at the API.
-- **Config-driven cloud scaling** — hexagonal ports let you swap **SQLite → Firestore**,
-  **AI Studio → Vertex AI**, and **local → Cloud Run** by environment variable.
+- **Config-driven cloud scaling** — a clean **storage port** swaps **SQLite → Firestore**
+  via `STORAGE_BACKEND`; **AI Studio → Vertex AI** is an env toggle (`USE_VERTEXAI`); and the
+  same pipeline deploys to **Cloud Run** (a separate product image) — no rewrite. (Storage is
+  the one real port; the rest are integrated directly — see [ARCHITECTURE.md](ARCHITECTURE.md).)
 - **Runs free locally** — collection/dedup/storage work with no key; the **test suite runs
   fully offline** (no key or quota needed).
-- **Security-minded** — localhost-only settings surface, optional shared `API_KEY`, per-source
-  rate limiting, and a single SSRF chokepoint for all outbound fetches.
+- **Security-minded** — localhost-only settings surface, optional shared `API_KEY`, rate
+  limiting on the expensive API endpoints, and a single SSRF chokepoint (IP-pinned, size-capped)
+  for all outbound fetches.
 
 ## Run it as a desktop app (local, single-user)
 
@@ -103,11 +139,12 @@ NewsCatchUpPipeline (ADK SequentialAgent)
 ```
 ADK-CATCH-UP-Agent/
 ├── app/                       # Python backend — the agent + API
-│   ├── agent.py               # ADK root agent (deploy surface)
-│   ├── fast_api_app.py        # ADK FastAPI app for Agent Engine / Cloud Run
+│   ├── agent.py               # ADK root agent (lazy-built)
+│   ├── fast_api_app.py        # ADK Agent Engine surface (web UI + /api, behind IAM/IAP)
+│   ├── web_app.py             # Cloud Run product app (console + /api; fails closed)
 │   ├── cli.py                 # `catchup` CLI — `run` (a digest) and `serve` (the API)
 │   ├── core/                  # domain models + config (pydantic-settings)
-│   │   └── ports/             # storage / session interfaces (hexagonal boundary)
+│   │   └── ports/             # storage interface (the one real hexagonal port)
 │   ├── pipeline/              # ADK agents — pipeline, processing, critic, judge, digest_editor, eval
 │   ├── services/              # collectors (rss · scrape · newsapi · search · youtube), normalize,
 │   │   │                      #   watchlist, scheduler, ratelimit, SSRF-guarded net, config_store
@@ -126,7 +163,7 @@ ADK-CATCH-UP-Agent/
 ├── tests/                     # unit · integration · eval  (all run fully offline)
 ├── docs/                      # ADK-GUIDE, eval guide, design specs, build log
 ├── ARCHITECTURE.md            # illustrated layer + pipeline diagrams
-├── Dockerfile                 # container image for Cloud Run / Agent Engine
+├── Dockerfile                 # Cloud Run product image (console + API via app.web_app)
 ├── pyproject.toml             # Python deps + the `catchup` entry point (uv)
 └── agents-cli-manifest.yaml   # google-agents-cli scaffold manifest
 ```
@@ -175,6 +212,25 @@ All settings are environment variables (or a gitignored `.env` / `app/.env`). Th
 
 See `app/core/config.py` for the complete list (rate-limit, critic, and Firestore tunables).
 
+**Console (frontend) build-time options.** The static console bakes these at
+`npm run build` — they are `NEXT_PUBLIC_*`, so they end up **in the browser bundle**.
+There is no runtime switch; you choose them per build:
+
+| Variable | Desktop (`run.sh`) | Dev (`npm run dev`) | Cloud Run image |
+|---|---|---|---|
+| `NEXT_PUBLIC_API_BASE` | `""` (same-origin) | `http://localhost:8000` | `""` (same-origin) |
+| `NEXT_PUBLIC_API_KEY` | unset (loopback, no key) | set only if the backend sets `API_KEY` | `--build-arg` = the backend `API_KEY` |
+
+The desktop launcher always builds same-origin with no key (loopback is the perimeter);
+for **dev** edit `frontend/.env.local` (copy from `.env.local.example`); for **Cloud Run**
+pass the key via `--build-arg NEXT_PUBLIC_API_KEY=...` (see [Deployment ▸ Cloud Run](#2-cloud-run--the-product-console--api)). Because the key is browser-visible, that path must run behind Cloud Run IAM / IAP.
+
+> **Secrets & key rotation.** Keys live only in a gitignored `.env` / `app/.env` — never in
+> git (CI runs **gitleaks** on every push to catch accidental leaks). If a key is ever exposed
+> or shared, rotate it: regenerate `GOOGLE_API_KEY` in
+> [Google AI Studio](https://aistudio.google.com/apikey) and `GNEWS_API_KEY` in your GNews
+> dashboard, then update your local `.env`.
+
 ## Quality & faithfulness
 
 Two LLM-as-judge safeguards protect summary quality (both build/test offline; live runs need `GOOGLE_API_KEY`):
@@ -215,6 +271,7 @@ uv run python -m app.cli serve --host 0.0.0.0 --port 8080
 | `POST /api/runs` | Trigger a new digest run (async) |
 | `GET /api/settings` | Non-secret local config (`app_host`, `app_port`, `gemini_key_set`, `shadowed_keys`) — loopback only |
 | `PUT /api/settings` | Set Gemini key (live) / port (next launch) — loopback + same-origin only |
+| `POST /feedback` | Log user feedback — **Agent Engine surface only** (`app/fast_api_app.py`); API-key-gated + rate-limited |
 | `GET /docs` | FastAPI auto-generated interactive docs (OpenAPI) |
 
 ## Web Console
@@ -248,6 +305,62 @@ Screens:
 ## Scheduling (opt-in)
 
 Set `SCHEDULE_ENABLED=true` + `SCHEDULE_CRON="0 7 * * *"` (+ optional `SCHEDULE_TIMEZONE`). `catchup serve` then runs the digest in-process on that cron via APScheduler, sharing the single-flight guard with manual `POST /api/runs`. In production, point Cloud Scheduler at `POST /api/runs` instead (see `docs/ADK-GUIDE.md` §6).
+
+## Deployment
+
+Three honest paths — pick one; each does exactly what it says.
+
+### 1. Local desktop (works today)
+
+`Catch-Up.app` / `./scripts/run.sh` → `create_app()` single-port on `127.0.0.1`,
+SQLite, no API key needed (loopback only). See
+[Run it as a desktop app](#run-it-as-a-desktop-app-local-single-user).
+
+### 2. Cloud Run — the product (console + API)
+
+The `Dockerfile` builds the Next.js console **and** serves it plus `/api/*` on one
+port via `app.web_app` (the product surface — **no** ADK-native routes). Required:
+set **`API_KEY`** (the image fails closed without it) and `ALLOW_ORIGINS`. Optional:
+`STORAGE_BACKEND=firestore` (the image installs the `[firestore]` extra — deploy
+`firestore.indexes.json` first via `gcloud firestore indexes composite create` /
+`firebase deploy --only firestore:indexes`) and `USE_VERTEXAI=true` for Vertex.
+Scheduled runs: point **Cloud Scheduler at `POST /api/runs`** (sending the API key).
+
+The console is a static export, so it authenticates with the **same** key **baked
+at build time** (`--build-arg NEXT_PUBLIC_API_KEY`). That key is visible in the
+browser bundle, so the product image **must run behind Cloud Run IAM / IAP** — that
+authenticated perimeter is the real user auth; the app `API_KEY` is a secondary
+guard (and what Cloud Scheduler sends). Build with the key, then deploy requiring
+authentication:
+
+```bash
+KEY=$(openssl rand -hex 24)
+docker build --build-arg NEXT_PUBLIC_API_KEY="$KEY" -t gcr.io/$PROJECT/catch-up .
+docker push gcr.io/$PROJECT/catch-up
+gcloud run deploy catch-up --image gcr.io/$PROJECT/catch-up \
+  --no-allow-unauthenticated \
+  --set-env-vars API_KEY="$KEY",ALLOW_ORIGINS=https://your-console
+```
+
+### 3. ADK Agent Engine (`agents-cli deploy`)
+
+`app/fast_api_app.py` exposes the ADK web UI + ADK-native routes (`/run`, sessions,
+evals) for Agent Engine / Gemini Enterprise. Those ADK-native routes are **not**
+app-key-gated, so this surface **must run behind Cloud Run IAM / IAP**. It serves
+no Next.js console — use path 2 for the product UI.
+
+> **Firestore status:** the adapter passes the full storage contract against the
+> Firestore **emulator**, but has **not** been validated against live GCP Firestore.
+> Deploy the composite indexes (`firestore.indexes.json`) before relying on filtered
+> news queries. **Migration runbook** — `backfill_is_flagged()` is a one-time,
+> manually-run op (it is not wired into startup and is idempotent). Run it once on any
+> pre-`is_flagged` data, e.g.:
+> ```python
+> from app.core.config import Settings
+> from app.runner import build_storage
+> n = build_storage(Settings(storage_backend="firestore")).backfill_is_flagged()
+> print(f"backfilled {n} docs")
+> ```
 
 ## How it was built (kept for learning)
 

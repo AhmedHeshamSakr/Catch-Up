@@ -11,8 +11,9 @@ Cloud** by configuration, not a rewrite.
 ## System at a glance
 
 Each layer talks to the next through a narrow interface, so any one can change without
-breaking the others — swap **SQLite → Firestore**, **AI Studio → Vertex AI**, or
-**APScheduler → Cloud Scheduler** by config alone.
+breaking the others — swap **SQLite → Firestore** (the one real storage port), flip
+**AI Studio → Vertex AI** (env toggle `USE_VERTEXAI`), or drive runs from
+**Cloud Scheduler → `POST /api/runs`** instead of in-process APScheduler.
 
 ```mermaid
 %%{init: {'theme':'base','themeVariables':{'fontFamily':'Inter, system-ui, sans-serif','fontSize':'14px','lineColor':'#94a3b8','primaryTextColor':'#0f172a'}}}%%

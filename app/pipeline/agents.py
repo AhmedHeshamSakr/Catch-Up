@@ -2,7 +2,9 @@
 
 Each wrapper is a thin BaseAgent subclass that reads state from
 ctx.session.state, calls the existing proven functions, and writes results
-back via EventActions.state_delta. No LLM calls — all orchestration only.
+back via EventActions.state_delta. The wrappers themselves are orchestration;
+the LLM-backed stages (Processing/GuardrailCritic/DigestEditor) invoke their
+injected callables off the event loop via ``asyncio.to_thread``.
 
 State-propagation: every cross-stage value travels via
 ``EventActions.state_delta`` as JSON-serializable data (run/items/raws as
@@ -44,7 +46,7 @@ from app.pipeline.critic import (
     select_for_critique,
 )
 from app.pipeline.processing import process_items
-from app.runner import (
+from app.pipeline.wiring import (
     _collect,
     _default_critic,
     _default_narrator,
@@ -358,6 +360,15 @@ class GuardrailCriticAgent(BaseAgent):
                     )
                 run.flagged = outcome["flagged"]
                 run.critic_verdicts = outcome["verdicts"]
+                # Reflection ran but its reprocessor was down — items are still
+                # protected (flagged/redacted), but record the degradation so a
+                # broken reflection subsystem is observable, not silent.
+                if outcome.get("degraded"):
+                    run.source_errors.append({
+                        "stage": "critic", "phase": "reflection",
+                        "error": "reflection reprocessor failed; affected items flagged/redacted",
+                        "ts": _now(), "degraded": True,
+                    })
         except Exception as exc:
             run.source_errors.append(
                 {"stage": "critic", "error": str(exc), "ts": _now(), "degraded": True}
@@ -454,7 +465,6 @@ def build_pipeline(
     settings: Settings,
     storage: StorageBackend,
     *,
-    run_id: str | None = None,
     collect_fn: Callable | None = None,
     processor: Callable | None = None,
     narrator: Callable | None = None,
@@ -467,9 +477,7 @@ def build_pipeline(
         session = await runner.session_service.create_session(
             ..., state={"run_id": run_id}
         )
-
-    The build_pipeline `run_id` param is accepted for forward compatibility
-    but unused here — PipelineInitAgent reads it from ctx.session.state.
+    PipelineInitAgent reads run_id from ctx.session.state.
     """
     _collect_fn = collect_fn or _collect
     _processor = processor or _default_processor(settings)

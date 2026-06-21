@@ -34,9 +34,15 @@ def try_start_run(
     if not _run_lock.acquire(blocking=False):
         return None
     run_id = uuid.uuid4().hex[:12]
-    threading.Thread(
-        target=_run_digest_guarded,
-        kwargs={"run_digest_fn": run_digest_fn, "settings": settings, "run_id": run_id},
-        daemon=True,
-    ).start()
+    try:
+        threading.Thread(
+            target=_run_digest_guarded,
+            kwargs={"run_digest_fn": run_digest_fn, "settings": settings, "run_id": run_id},
+            daemon=True,
+        ).start()
+    except BaseException:
+        # The thread never started, so its finally won't release the lock —
+        # release here, else every future run would 409 / be skipped forever.
+        _run_lock.release()
+        raise
     return run_id

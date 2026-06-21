@@ -33,7 +33,6 @@ def build_editor_agent(model: str, temperature: float = 0.0) -> Agent:
         model=model,
         instruction=_PROMPT,
         output_schema=DigestNarrative,
-        output_key="digest_narrative",
         generate_content_config=types.GenerateContentConfig(temperature=temperature),
     )
 

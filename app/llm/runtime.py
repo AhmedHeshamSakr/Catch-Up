@@ -80,14 +80,40 @@ async def _run_text_async(
     return await asyncio.wait_for(_consume(), timeout=timeout)
 
 
+def _is_retryable(exc: Exception) -> bool:
+    """Retry only TRANSIENT failures (timeouts, rate limits, 5xx, transport).
+
+    Fail fast on PERMANENT ones — auth, model-not-found, invalid request,
+    config/validation — so a misconfiguration surfaces immediately instead of
+    being masked as a slow 'transient' across every retry+backoff.
+    """
+    if isinstance(exc, TimeoutError):
+        return True
+    if isinstance(exc, (ValueError, TypeError, KeyError)):
+        # config / programming / validation errors won't fix on retry
+        return False
+    # google.genai APIError (and many HTTP clients) expose the status as .code /
+    # .status_code; httpx transport errors have neither and fall through to retry.
+    code = getattr(exc, "status_code", None)
+    if not isinstance(code, int):
+        code = getattr(exc, "code", None)
+    if isinstance(code, int):
+        if code in (408, 429) or 500 <= code <= 599:
+            return True
+        if 400 <= code <= 499:
+            return False  # auth / not-found / invalid request — permanent
+    return True  # unknown → treat as transient (favor availability)
+
+
 def run_agent_text(
     agent: Agent, payload: str, settings: Settings, *, app_name: str = "catchup"
 ) -> str:
     """Sync bridge for the sync run_digest pipeline. Real LLM call (needs GOOGLE_API_KEY).
 
-    Applies a per-attempt timeout and retries transient failures (including
-    timeouts) with exponential backoff plus jitter before re-raising the last
-    exception.
+    Applies a per-attempt timeout and retries TRANSIENT failures (timeouts, rate
+    limits, 5xx, transport) with exponential backoff plus jitter. Permanent
+    failures (auth/not-found/invalid-request/config — see ``_is_retryable``) are
+    re-raised immediately rather than retried.
     """
     configure_genai(settings)
     attempts = 1 + max(0, settings.llm_max_retries)
@@ -97,9 +123,9 @@ def run_agent_text(
             return _run_coro_sync(
                 _run_text_async(agent, payload, app_name=app_name, timeout=settings.llm_timeout)
             )
-        except Exception as exc:  # retry transient runner/timeout failures
+        except Exception as exc:
             last_exc = exc
-            if attempt == attempts - 1:
+            if attempt == attempts - 1 or not _is_retryable(exc):
                 break
             sleep = settings.llm_backoff_base * (2**attempt) + random.uniform(
                 0, settings.llm_backoff_base

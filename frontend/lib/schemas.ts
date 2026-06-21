@@ -33,8 +33,6 @@ export const entitySchema = z.object({
 
 export const newsItemSchema = z.object({
   id: z.string(),
-  org_id: z.string(),
-  user_id: z.string(),
   source_id: z.string(),
   source_type: sourceTypeSchema,
   source_name: z.string(),
@@ -50,7 +48,6 @@ export const newsItemSchema = z.object({
   importance_score: z.number().nullable(),
   entities: z.array(entitySchema),
   sentiment: sentimentSchema.nullable(),
-  language: z.string().nullable(),
   status: z.string(),
   digest_run_id: z.string().nullable(),
   image_url: z.string().nullish(),
@@ -58,7 +55,6 @@ export const newsItemSchema = z.object({
 
 export const digestRunSchema = z.object({
   run_id: z.string(),
-  org_id: z.string(),
   started_at: z.string(),
   finished_at: z.string().nullable(),
   status: runStatusSchema,

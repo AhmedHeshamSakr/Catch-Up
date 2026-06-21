@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from app.services.youtube_resolve import resolve_channel_id
 
 # A realistic channel id fixture
@@ -81,6 +83,28 @@ def test_no_match_returns_none():
     """HTML with no UC… id → None."""
     result = resolve_channel_id("@unknown", fetch=_fake_fetch(_NO_ID_HTML))
     assert result is None
+
+
+def test_non_youtube_url_is_rejected():
+    """A full URL on a non-YouTube host must be rejected — otherwise this is an
+    arbitrary-URL fetcher via POST /api/sources/resolve."""
+    called = []
+
+    def spy_fetch(url: str) -> bytes:
+        called.append(url)
+        return b""
+
+    with pytest.raises(ValueError, match="not a YouTube URL"):
+        resolve_channel_id("https://evil.example.com/ssrf", fetch=spy_fetch)
+    assert called == [], "must reject BEFORE fetching"
+
+
+def test_youtu_be_short_host_allowed():
+    """youtu.be is a legitimate YouTube host."""
+    result = resolve_channel_id(
+        "https://youtu.be/@mkbhd", fetch=_fake_fetch(_HANDLE_HTML)
+    )
+    assert result == _CHANNEL_ID
 
 
 def test_handle_fetch_url_uses_youtube_domain():

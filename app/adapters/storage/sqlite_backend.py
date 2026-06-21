@@ -43,17 +43,37 @@ class SqliteBackend(StorageBackend):
         with self._conn() as conn:
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS news_items ("
-                "id TEXT PRIMARY KEY, run_id TEXT, org_id TEXT, category TEXT, "
+                "id TEXT PRIMARY KEY, run_id TEXT, category TEXT, "
                 "importance TEXT, collected_at TEXT, status TEXT, data TEXT NOT NULL)"
             )
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS digest_runs ("
-                "run_id TEXT PRIMARY KEY, org_id TEXT, status TEXT, "
+                "run_id TEXT PRIMARY KEY, status TEXT, "
                 "started_at TEXT, data TEXT NOT NULL)"
             )
             # Migrate older databases that predate the query columns.
             self._ensure_columns(conn, "news_items", self._NEWS_COLUMNS)
             self._ensure_columns(conn, "digest_runs", self._RUN_COLUMNS)
+            # Backfill the query columns from the JSON blob for legacy rows.
+            # status + collected_at are ALWAYS set on rows written by this code, so
+            # a NULL there marks a pre-migration row — recover all four columns from
+            # `data` (json_extract returns the stored enum .value / ISO string, which
+            # is exactly what save_items writes). Without this, legacy rows are
+            # invisible to category/importance filters, mis-ordered by collected_at,
+            # and — worst — legacy `status='flagged'` rows LEAK into default reads.
+            conn.execute(
+                "UPDATE news_items SET "
+                "category = json_extract(data, '$.category'), "
+                "importance = json_extract(data, '$.importance'), "
+                "collected_at = json_extract(data, '$.collected_at'), "
+                "status = json_extract(data, '$.status') "
+                "WHERE status IS NULL OR collected_at IS NULL"
+            )
+            conn.execute(
+                "UPDATE digest_runs SET "
+                "started_at = json_extract(data, '$.started_at') "
+                "WHERE started_at IS NULL"
+            )
             for col in ("category", "importance", "collected_at", "run_id", "status"):
                 conn.execute(
                     f"CREATE INDEX IF NOT EXISTS idx_news_{col} ON news_items({col})"
@@ -76,11 +96,11 @@ class SqliteBackend(StorageBackend):
         with self._conn() as conn:
             conn.executemany(
                 "INSERT OR REPLACE INTO news_items "
-                "(id, run_id, org_id, category, importance, collected_at, status, data) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "(id, run_id, category, importance, collected_at, status, data) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
-                        i.id, i.digest_run_id, i.org_id,
+                        i.id, i.digest_run_id,
                         i.category.value if i.category else None,
                         i.importance.value if i.importance else None,
                         i.collected_at.isoformat(),
@@ -106,8 +126,8 @@ class SqliteBackend(StorageBackend):
         with self._conn() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO digest_runs "
-                "(run_id, org_id, status, started_at, data) VALUES (?, ?, ?, ?, ?)",
-                (run.run_id, run.org_id, run.status.value, run.started_at.isoformat(),
+                "(run_id, status, started_at, data) VALUES (?, ?, ?, ?)",
+                (run.run_id, run.status.value, run.started_at.isoformat(),
                  run.model_dump_json()),
             )
 

@@ -12,6 +12,13 @@ from app.core.config import Settings
 from app.core.domain import Category, RawItem, RunStatus, SourceType
 from app.llm.schema import ItemEnrichment, ProcessingResult
 from app.pipeline.agents import build_pipeline
+from app.pipeline.eval_schema import FaithfulnessVerdict
+
+
+def _pass_critic(items):
+    """A critic that explicitly judges every item faithful (the realistic
+    'nothing to flag' result — an empty list now fails closed)."""
+    return [FaithfulnessVerdict(item_id=i.id, faithful=True) for i in items]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -86,11 +93,10 @@ async def test_pipeline_tree_success(tmp_path):
     run_id = "testrun000001"
     tree = build_pipeline(
         settings, storage,
-        run_id=run_id,
         collect_fn=fake_collect,
         processor=fake_processor,
         narrator=lambda items: "Narrative text.",
-        critic=lambda items: [],
+        critic=_pass_critic,
     )
 
     await _drive(tree, run_id)
@@ -105,11 +111,11 @@ async def test_pipeline_tree_success(tmp_path):
     assert len(saved_items) == 1
 
     from pathlib import Path
-    assert "md" in run.outputs
+    # Lock the exact output-key set: the frontend (output-links.tsx) reads these
+    # literal keys, so a rename here silently breaks the UI badges.
+    assert set(run.outputs) == {"md", "xlsx", "html"}
     assert Path(run.outputs["md"]).exists()
-    assert "xlsx" in run.outputs
     assert Path(run.outputs["xlsx"]).exists()
-    assert "html" in run.outputs
     assert Path(run.outputs["html"]).exists()
 
 
@@ -127,7 +133,6 @@ async def test_pipeline_tree_partial_on_collect_error(tmp_path):
     run_id = "testrun000002"
     tree = build_pipeline(
         settings, storage,
-        run_id=run_id,
         collect_fn=boom_collect,
         processor=lambda items: ProcessingResult(items=[]),
         narrator=lambda items: "",

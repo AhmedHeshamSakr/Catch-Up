@@ -101,7 +101,9 @@ def run_eval(
     # Judge all pairs
     verdicts: list[EnrichmentVerdict] = judge(pairs)
 
-    return aggregate(verdicts)
+    # Pass the judged ids so a verdict the judge OMITTED counts as a hard failure
+    # (fail-closed) instead of silently inflating the pass_rate.
+    return aggregate(verdicts, expected_ids=[item.id for item, _ in pairs])
 
 
 def run_calibration(*, judge: JudgeFn, reference: list[dict]) -> dict:

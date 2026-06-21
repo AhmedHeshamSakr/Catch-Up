@@ -115,7 +115,6 @@ async def test_pipeline_tree_against_persistent_session(tmp_path):
     run_id = "persistrun001"
     tree = build_pipeline(
         settings, storage,
-        run_id=run_id,
         collect_fn=fake_collect,
         processor=fake_processor,
         narrator=lambda items: "Narrative.",

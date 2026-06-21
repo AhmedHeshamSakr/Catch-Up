@@ -29,7 +29,8 @@ Cloud production at low cost** is a configuration/deployment change — not a re
 
 ### Non-Goals (v1, deferred)
 - Email / push delivery (later phase).
-- Full multi-tenant auth/RBAC enabled (architecture supports it; v1 ships single-user).
+- Multi-tenant auth/RBAC. v1 is **single-user**; the early `org_id`/`user_id` keys were
+  removed as vestigial (§10), so multi-tenancy is a future schema change, not a toggle.
 - Mobile app.
 - Real-time/event-driven alerting (v1 is scheduled batch).
 
@@ -82,12 +83,12 @@ The scheduler triggers `run_digest()`; the API also triggers it on demand and se
 | Scheduler | APScheduler / local cron | Cloud Scheduler → HTTP trigger |
 | Frontend | Next.js + shadcn/ui + Tailwind | same (Vercel or Cloud Run) |
 | Excel/HTML/MD | openpyxl, Jinja2, markdown | same |
-| Resilience | tenacity (retry), pyrate-limiter/token bucket | same |
+| Resilience | custom LLM retry/backoff (`app/llm`) + `TokenBucket` rate limiter | same |
 
 ## 6. Design Principles & Patterns
 
-- **Clean / Hexagonal architecture (ports & adapters):** domain + use-cases independent of frameworks; ADK, FastAPI, storage, scheduler, LLM provider are adapters at the edges.
-- **SOLID:** dependency inversion at every swap-point (interfaces in core, implementations injected).
+- **Ports & adapters where it pays (as built):** the domain (`app/core/domain.py`) is framework-free, and **storage** is a clean port with SQLite/Firestore adapters (§12). The rest is pragmatic flat modules — ADK, FastAPI, the scheduler, and the LLM provider are integrated directly rather than behind ports (a port with a single implementation is indirection without payoff). `run_digest()` is the use-case (in `app/runner.py`), not a separate `usecases/` layer.
+- **SOLID:** dependency inversion **where it pays** — storage is injected via the `StorageBackend` port (§12); the scheduler, LLM provider, and ADK are integrated directly (no port). Pragmatic, not dogmatic.
 - **Strategy pattern** for collectors (one per source type) and renderers (one per output format).
 - **Repository pattern** for storage (`StorageBackend`).
 - **Factory / DI container** to wire implementations from config (`Settings` → providers).
@@ -106,7 +107,6 @@ class Sentiment(str, Enum): POSITIVE; NEUTRAL; NEGATIVE
 class Entity(BaseModel): name: str; type: Literal["company","person","org","place"]
 class NewsItem(BaseModel):
     id: str                  # sha256(url)
-    org_id: str; user_id: str            # multi-tenant keys (single value in v1)
     source_id: str; source_type: SourceType; source_name: str
     url: HttpUrl; title: str; excerpt: str | None
     published_at: datetime | None; collected_at: datetime
@@ -115,12 +115,11 @@ class NewsItem(BaseModel):
     importance: Importance | None; importance_score: float | None  # 0..1 raw
     entities: list[Entity] = []
     sentiment: Sentiment | None
-    language: str | None
     status: Literal["raw","processed","filtered"]
     digest_run_id: str | None
 
 class DigestRun(BaseModel):
-    run_id: str; org_id: str
+    run_id: str
     started_at; finished_at; status: Literal["running","success","partial","failed"]
     collected: int; new: int; processed: int; high_importance: int
     outputs: dict[str, str]              # {"xlsx": path, "html": path, "md": path}
@@ -132,12 +131,15 @@ class DigestRun(BaseModel):
 
 Each collector is a strategy implementing a common `Collector` protocol
 (`collect(source: SourceConfig) -> list[RawItem]`):
-- **rss_service** — feedparser; ETag/Last-Modified caching.
-- **scrape_service** — httpx + selectolax/BeautifulSoup; per-site CSS selector config; robots-aware.
+- **rss_service** — feedparser. *(No ETag/Last-Modified conditional fetch yet.)*
+- **scrape_service** — httpx + BeautifulSoup; per-site CSS selector config. *(Not robots-aware.)*
 - **newsapi_service** — pluggable provider adapter (GNews/NewsAPI free tiers); query + category mapping.
 - **search grounding** — ADK `LlmAgent` with `google_search` for broad, current items.
 
-All network calls go through a shared **HTTP client** with timeouts, retries, and rate limiting.
+All outbound HTTP goes through the shared SSRF-safe **`safe_get`** (`app/services/net.py`):
+per-call connect/read **timeout**, **IP-pinning** + per-hop public-IP validation, and a
+streamed **response size cap**. *(No automatic retries / conditional GETs at this layer;
+rate limiting is applied at the API endpoints, not per outbound fetch.)*
 
 ## 9. Agent Pipeline (detail)
 
@@ -162,50 +164,84 @@ validated structured output.
 - **Bilingual handling:** detect language; produce EN + AR summaries; preserve original named entities.
 - **Grounding/citation:** keep source URL with every item; digest references sources.
 - **Injection defenses:** treat fetched content as untrusted data, delimited and clearly labeled; instructions never taken from article text (see §13).
-- **Eval harness** (ADK eval): golden set of items with expected category/importance to catch regressions.
+- **Eval harness** (custom enrichment harness — `scripts/eval_enrichment.py`, NOT `agents-cli eval`): golden set of items with expected category/importance to catch regressions.
 
 ## 11. Orchestration & State
 
 - Deterministic pipeline order via `SequentialAgent`; concurrency via `ParallelAgent` for collection.
 - Run lifecycle owned by `run_digest(run_id)`: create `DigestRun(running)` → run pipeline → finalize status.
 - Idempotent: dedup ensures re-runs don't duplicate; `run_id` keys outputs.
-- Cancellation/timeout budget per stage; partial results persisted progressively.
+- Cancellation/timeout budget per stage. *(Items are persisted at the Render stage,
+  not progressively per batch — a crash before Render loses the run's collected items;
+  see §13.)*
 
-## 12. Swap-Points (Ports & Adapters)
+## 12. Swap-Points
+
+The one place that earns a port/adapter split — two real implementations — is
+**storage**:
 
 ```
-core/ports/
-├── storage.py     # StorageBackend (ABC): save_items, get_items, exists, create_run, finalize_run...
-├── scheduler.py   # Scheduler (ABC): schedule(job, cron), trigger_now()
-└── llm.py         # provider selection is via ADK env toggle (GOOGLE_GENAI_USE_VERTEXAI)
-adapters/
-├── storage/sqlite_backend.py | firestore_backend.py
-└── scheduling/local_scheduler.py | cloud_scheduler.py
+app/core/ports/storage.py                # StorageBackend (ABC): existing_ids, save_items,
+                                         #   get_items_for_run, create_run, finalize_run,
+                                         #   get_run, list_runs, list_news
+app/adapters/storage/sqlite_backend.py | firestore_backend.py
 ```
-A `Settings`-driven factory wires the concrete adapters. **No business logic differs between v1 and prod.**
+
+`build_storage(settings)` (in `app/runner.py`) wires the concrete backend from
+`STORAGE_BACKEND`. The other two "swaps" need no port — they're an env toggle or
+an HTTP call, so adding a port would be indirection without payoff:
+
+- **LLM provider** — AI Studio ↔ Vertex via the env toggle `USE_VERTEXAI`
+  (`app/llm/runtime.py:configure_genai`, which then sets the genai client's
+  `GOOGLE_GENAI_USE_VERTEXAI`). No `llm.py` port.
+- **Scheduler** — local APScheduler (`app/services/scheduler.py`, opt-in via
+  `SCHEDULE_ENABLED`) ↔ Cloud Scheduler, which simply calls **`POST /api/runs`**.
+  No scheduling adapter.
+
+**No business logic differs between v1 and prod.** *(The earlier draft of this
+section listed `scheduler.py`/`llm.py` ports and a `scheduling/` adapter; those
+were never built — see §21.)*
 
 ## 13. Fault Tolerance & Resilience
 
 - **Per-source isolation:** a failing source is logged to `source_errors`; the run continues (partial success).
-- **Retries with exponential backoff + jitter** (tenacity) on network/API/LLM transient errors.
-- **Circuit breaker** per source to skip repeatedly-failing sources within a run.
-- **Timeouts** on every external call; overall stage time budget.
-- **Structured-output validation** with one retry; on failure item stays `raw` (never crashes the run).
+- **Retries with exponential backoff + jitter** on the structured `app/llm.run_agent_text`
+  calls (a custom loop, not tenacity; `llm_max_retries` / `llm_backoff_base`). *(Collector
+  fetches, the ADK search-grounding call, and YouTube transcript fetches are NOT on this
+  retry path — they rely on per-source isolation.)*
+- **Circuit breaker** per source — **planned, not yet implemented**; per-source isolation
+  (above) already stops one failing source from failing the whole run.
+- **Timeouts:** a hard per-call `llm_timeout` on LLM calls and a connect/read timeout on
+  `safe_get` HTTP fetches; an OPTIONAL run-level `run_timeout` soft cap (default off).
+  *(Search-grounding and YouTube-transcript calls currently use their library defaults.)*
+- **Structured-output validation:** malformed JSON is repaired/re-parsed (`app/llm/parse.py`)
+  and the call retried via the loop above; a batch that still fails leaves its items `raw`
+  (never crashes the run).
 - **Graceful degradation:** if LLM quota is exhausted, collection + dedup + storage still complete; processing resumes next run.
-- **Idempotent, resumable runs**; progressive persistence so a crash loses at most the in-flight batch.
+- **Idempotent re-runs** (dedup by id via `existing_ids`). *(Persistence is NOT
+  progressive: items are written at the Render stage, so a crash before Render loses the
+  run's collected items — not yet "loses at most the in-flight batch".)*
 
 ## 14. Rate Limiting & Cost Controls
 
-- **Token-bucket rate limiters** per external dependency (per news API, per LLM RPM, per host for scraping).
+- **Token-bucket rate limiter** (`app/services/ratelimit.py`) — currently guards the
+  expensive API endpoints (`POST /api/runs`, `/api/sources/resolve`); per-source / per-host
+  buckets are future work.
 - LLM runs **only on new (deduped) items**, **batched**, on **Gemini Flash**.
 - **Importance threshold** filters items before the (more expensive) narrative step.
-- **Caching:** RSS conditional GETs; grounding results cached within a run; HTTP response cache.
-- **Quota-aware scheduling** respects free-tier RPM/RPD; backoff on 429.
+- **No re-work:** `existing_ids` skips already-stored URLs before any LLM call, so re-runs
+  don't re-enrich. *(RSS conditional GETs / grounding cache / HTTP response cache are not implemented.)*
+- **Backoff on quota/transient errors** via the LLM retry loop. *(There is no quota-aware
+  scheduler that pre-emptively respects RPM/RPD — runs back off and degrade gracefully.)*
 
 ## 15. Security & Multi-Tenancy
 
-- **Multi-tenant data model** from day 1 (`org_id`/`user_id` on all records); v1 uses a single default tenant; enabling auth later is a toggle, not a migration.
-- **AuthN/Z (prod):** Firebase Auth / Identity Platform; RBAC roles (admin, editor, viewer); per-org data isolation enforced in the repository layer.
+- **Single-user (as built):** v1 ships single-user — no per-record tenant keys. The
+  original `org_id`/`user_id` columns were never used in any query path and were removed
+  (§10); real multi-tenancy is future work (a schema change, not a config toggle).
+- **AuthN/Z (prod):** the network perimeter is the auth boundary — API key for service
+  calls + Cloud Run IAM/IAP for users (see README "Deployment"). RBAC roles
+  (admin/editor/viewer) and per-org isolation are future, gated on the multi-tenant model.
 - **Secrets:** never in code/repo; `.env` locally, Secret Manager in prod; `.gitignore` covers keys/SA JSON.
 - **Input sanitization & SSRF protection** for user-provided source URLs (allowlist schemes, block internal IP ranges, size/time limits on fetches).
 - **Prompt-injection defense:** fetched article content is data, not instructions — delimited, labeled untrusted; system prompts forbid following embedded instructions; outputs schema-constrained.
@@ -227,7 +263,8 @@ A `Settings`-driven factory wires the concrete adapters. **No business logic dif
 - Accents: **emerald** (`#059669` light / `#34D399` dark) + **cyan** (`#0891B2`); semantic red/amber/green for importance/health.
 - **Light + Dark**, default **Auto = system** (`prefers-color-scheme`).
 - **Lucide outline icons** (no emoji); 8-pt spacing grid; AA contrast; shared component system (shadcn/ui).
-- Enterprise left sidebar: brand lockup + **workspace switcher** (multi-tenant entry) + grouped nav + profile footer.
+- Enterprise left sidebar: brand lockup + grouped nav + profile footer. *(A workspace
+  switcher is deferred with multi-tenancy — see §15.)*
 
 ### Information architecture (screens)
 1. **Dashboard** — stats, "what matters most", by-category breakdown, recent-run health.
@@ -239,15 +276,24 @@ A `Settings`-driven factory wires the concrete adapters. **No business logic dif
 7. **Runs & Schedule** — schedule config; run history + per-source diagnostics.
 8. **Settings** — provider toggle (AI Studio/Vertex), API keys, output prefs; (Organization/Members — later).
 
-### API surface (FastAPI, illustrative)
+> **As built:** Dashboard, Digests, **News** (filterable feed), Sources, Watchlist, and
+> Settings ship today. **Categories (5), Pipeline (6), and Runs & Schedule (7) are not yet
+> built** — that's the deferred "console screens" milestone (their `/api/categories` and
+> `/api/pipeline/config` endpoints don't exist yet either; see §17).
+
+### API surface (FastAPI — as built)
 ```
-GET  /api/dashboard
-GET  /api/digests            POST /api/digests/run
-GET  /api/runs  /api/runs/{id}
-CRUD /api/sources  /api/watchlist  /api/categories
-GET/PUT /api/pipeline/config   GET /api/settings  PUT /api/settings
-GET  /api/news  (search/filter)
+GET     /api/health   /api/dashboard
+GET     /api/runs   /api/runs/{id}      POST /api/runs      # trigger a digest run (409 if busy)
+GET     /api/news   (search/filter)
+GET/PUT /api/sources                    POST /api/sources/resolve
+GET/PUT /api/watchlist
+GET/PUT /api/settings
+GET     /{path}   (static console mount; SPA fallback)
 ```
+*Not yet built (the deferred "console screens" milestone — §16 screens 6–8):
+`/api/categories`, `/api/pipeline/config`, and a dedicated `/api/digests` (digests are
+currently a frontend view over `/api/runs` + `/api/news`, not a backend resource).*
 
 ## 18. Configuration
 
@@ -259,43 +305,55 @@ GET  /api/news  (search/filter)
 ## 19. Deployment Phasing
 
 - **v1 (free, local):** AI Studio key + SQLite + APScheduler; `adk web`/CLI + `next dev`. $0.
-- **Production:** flip `GOOGLE_GENAI_USE_VERTEXAI=TRUE`; Dockerize; deploy API to **Cloud Run**; **Cloud Scheduler** → `/api/digests/run`; **Firestore** backend; Secret Manager; frontend on Vercel/Cloud Run. Lowest-cost serverless, scale-to-zero.
+- **Production:** flip `USE_VERTEXAI=true`; Dockerize; deploy to **Cloud Run** (the product image serves console + `/api` same-origin); **Cloud Scheduler** → `POST /api/runs`; **Firestore** backend; Secret Manager. Lowest-cost serverless, scale-to-zero. See README "Deployment" for the three concrete paths.
 
 ## 20. Testing Strategy (TDD)
 
 - Unit tests per service with fixtures (sample feeds/HTML/API JSON).
 - **Storage contract tests** run against SQLite + Firestore emulator (same suite).
 - Pipeline agents tested with mocked LLM responses; schema-validation tests.
-- **ADK eval set** for processing quality (category/importance golden data).
+- **Custom enrichment eval** for processing quality (category/importance golden data via `scripts/eval_enrichment.py`).
 - API integration tests; frontend component tests; E2E happy path (run → digest → outputs).
 - CI gates: lint (ruff), type-check (mypy), tests, coverage threshold.
 
 ## 21. Project Structure
 
+As built — a flat `app/` package (not the deeper `backend/catchup/` tree this
+section originally sketched):
+
 ```
 .
-├── backend/
-│   ├── catchup/
-│   │   ├── agent.py                 # root_agent = NewsCatchUpPipeline (ADK entrypoint)
-│   │   ├── pipeline/                # collection, normalize, processing, digest_editor, render
-│   │   ├── services/                # rss, scrape, newsapi, render/{excel,html,markdown}, http
-│   │   ├── core/
-│   │   │   ├── domain/              # schema.py (NewsItem, DigestRun, enums)
-│   │   │   ├── ports/               # storage.py, scheduler.py
-│   │   │   ├── usecases/            # run_digest, source mgmt
-│   │   │   └── config.py            # Settings + DI factory
-│   │   ├── adapters/storage/        # sqlite_backend, firestore_backend
-│   │   ├── adapters/scheduling/     # local_scheduler, cloud_scheduler
-│   │   ├── prompts/                 # versioned prompt files
-│   │   ├── api/                     # FastAPI app + routers
-│   │   └── runner.py                # run_digest() job
-│   ├── config/                      # app.yaml, sources.yaml, watchlist.yaml
-│   ├── tests/
-│   ├── pyproject.toml  .env.example  Dockerfile
-├── frontend/                        # Next.js + shadcn/ui + Tailwind console
-├── docs/
+├── app/
+│   ├── agent.py                 # ADK root agent (lazy-built)
+│   ├── fast_api_app.py          # ADK Agent Engine surface (web UI + /api)
+│   ├── web_app.py               # Cloud Run product app = create_app()
+│   ├── cli.py                   # `catchup` CLI: run / serve
+│   ├── runner.py                # run_digest() job + build_storage()
+│   ├── run_trigger.py           # shared single-flight run starter (API + scheduler)
+│   ├── core/                    # domain.py, config.py, env_store.py, ports/storage.py
+│   ├── pipeline/                # agents.py (ADK tree), wiring.py, processing, critic,
+│   │                            #   judge, digest_editor, eval_score, eval_schema
+│   ├── llm/                     # Gemini runtime + structured-output schema/parse
+│   ├── services/               # rss, scrape, newsapi, search, youtube, normalize,
+│   │   │                        #   watchlist, scheduler, ratelimit, net, config_store,
+│   │   │                        #   feed_discovery, youtube_resolve
+│   │   └── render/             # excel, html, markdown
+│   ├── adapters/storage/       # sqlite_backend.py, firestore_backend.py
+│   ├── api/                    # FastAPI product API + static console mount
+│   ├── app_utils/             # telemetry, typing
+│   └── prompts/               # versioned prompt files (*.md)
+├── frontend/                   # Next.js + shadcn/ui + Tailwind console
+├── config/                     # sources.yaml, watchlist.yaml
+├── tests/                      # unit, integration, eval
+├── docs/                       # ADK-GUIDE, eval, specs, plans, BUILD-LOG
+├── Dockerfile  firestore.indexes.json  pyproject.toml  agents-cli-manifest.yaml
 └── README.md
 ```
+
+> There is no `core/usecases/` or `core/domain/` package, and no
+> `adapters/scheduling/` — `run_digest()` (the use-case) lives in `runner.py`,
+> the domain is a single `core/domain.py` module, and only storage needed a
+> port/adapter split (§12). The flat layout proved sufficient.
 
 ## 22. Milestones
 
@@ -321,4 +379,4 @@ GET  /api/news  (search/filter)
 
 **Future work:**
 - Email / push delivery (deferred phase).
-- Multi-tenant auth rollout timing (architecture ready; enable when needed).
+- Multi-tenancy (re-introduce tenant keys + auth/RBAC) — a schema change when needed.

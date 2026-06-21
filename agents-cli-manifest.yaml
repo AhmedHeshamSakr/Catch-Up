@@ -1,3 +1,13 @@
+# google-agents-cli SCAFFOLD descriptor — records how this project was generated
+# (2026-05-23). It is NOT the live runtime/deploy config and does NOT drive the
+# Cloud Run product image. Authoritative config lives elsewhere:
+#   - Runtime settings (storage/session/Vertex/scheduler): app/core/config.py + env.
+#     The app defaults to session_backend="database" (durable) and STORAGE_BACKEND
+#     can be "firestore" — i.e. the create_params below (in_memory / datastore=none)
+#     are the original scaffold choices, not the current behavior.
+#   - Deployment paths: see README "Deployment" — (1) local desktop, (2) Cloud Run
+#     product image (Dockerfile -> app.web_app), (3) ADK Agent Engine
+#     (`agents-cli deploy` -> app/fast_api_app.py, behind IAM/IAP).
 name: "catch-up"
 acli_version: "0.2.0"
 agent_directory: "app"
