@@ -20,6 +20,39 @@ validated against live GCP**. Design is approved — see
 [`ARCHITECTURE.md`](ARCHITECTURE.md) and the
 [design spec](docs/superpowers/specs/2026-05-23-adk-catchup-agent-design.md).
 
+## Overview deck
+
+A 13-slide visual tour — the problem, the multi-agent pipeline, the architecture
+decisions, and how it was built. **[⬇ Download the PDF](presentation/Catch-Up.pdf)** · [PowerPoint](presentation/Catch-Up.pptx).
+
+[![Catch-Up — News Intelligence Agent (overview deck)](presentation/slides/slide-01.png)](presentation/Catch-Up.pdf)
+
+<details>
+<summary><b>▶  Browse all 13 slides</b></summary>
+
+<br/>
+
+![Slide 1 — Title](presentation/slides/slide-01.png)
+![Slide 2 — The problem](presentation/slides/slide-02.png)
+![Slide 3 — The solution](presentation/slides/slide-03.png)
+![Slide 4 — How it works (pipeline)](presentation/slides/slide-04.png)
+![Slide 5 — The ADK agent tree](presentation/slides/slide-05.png)
+![Slide 6 — What each agent does](presentation/slides/slide-06.png)
+![Slide 7 — Architecture decisions](presentation/slides/slide-07.png)
+![Slide 8 — Collect from everywhere](presentation/slides/slide-08.png)
+![Slide 9 — Rank & summarize with Gemini](presentation/slides/slide-09.png)
+![Slide 10 — A guardrail you can trust](presentation/slides/slide-10.png)
+![Slide 11 — Delivered the way you work](presentation/slides/slide-11.png)
+![Slide 12 — How it was built](presentation/slides/slide-12.png)
+![Slide 13 — Summary](presentation/slides/slide-13.png)
+
+</details>
+
+> Rebuild the deck after editing `presentation/build_deck.py`:
+> `uv run --with python-pptx python presentation/build_deck.py` →
+> `soffice --headless --convert-to pdf --outdir presentation presentation/Catch-Up.pptx` →
+> `pdftoppm -png -r 100 presentation/Catch-Up.pdf presentation/slides/slide`.
+
 ## Features
 
 - **Multi-source collection** — RSS, web **scrape** (CSS selector, SSRF-guarded), **GNews**
