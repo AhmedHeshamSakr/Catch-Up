@@ -596,3 +596,40 @@ def test_create_app_refuses_nonlocal_bind_without_key(tmp_path):
     )
     with pytest.raises(RuntimeError, match="API_KEY"):
         create_app(settings, run_digest_fn=lambda **kw: None)
+
+
+# ---------------------------------------------------------------------------
+# CSRF: when the API is OPEN (no api_key), block cross-origin mutations
+# ---------------------------------------------------------------------------
+
+
+def test_open_api_blocks_cross_origin_mutation(tmp_path):
+    c = _auth_client(tmp_path, api_key=None)  # open mode
+    src = [{"id": "x", "type": "rss", "name": "X", "url": "https://x/feed", "enabled": True}]
+    evil = {"Origin": "https://evil.example"}
+    assert c.put("/api/sources", json=src, headers=evil).status_code == 403
+    assert c.put("/api/watchlist", json={"entities": [], "keywords": []},
+                 headers=evil).status_code == 403
+    assert c.post("/api/runs", headers=evil).status_code == 403
+    assert c.post("/api/sources/resolve",
+                  json={"type": "youtube", "url": "https://youtube.com/@x"},
+                  headers=evil).status_code == 403
+    # Referer is honored too (some browsers omit Origin on some requests).
+    assert c.post("/api/runs", headers={"Referer": "https://evil.example/page"}).status_code == 403
+
+
+def test_open_api_allows_same_origin_and_no_origin(tmp_path):
+    c = _auth_client(tmp_path, api_key=None)  # open; default allow_origins = localhost:3000
+    src = [{"id": "x", "type": "rss", "name": "X", "url": "https://x/feed", "enabled": True}]
+    # Allow-listed console origin passes.
+    assert c.put("/api/sources", json=src,
+                 headers={"Origin": "http://localhost:3000"}).status_code == 200
+    # No Origin/Referer (CLI, curl, tests) passes — CSRF is browser-only.
+    assert c.post("/api/runs").status_code == 202
+
+
+def test_keyed_api_ignores_origin(tmp_path):
+    # When api_key is set, the key is the control; cross-origin with a valid key is fine.
+    c = _auth_client(tmp_path, api_key="secret")
+    h = {"X-API-Key": "secret", "Origin": "https://evil.example"}
+    assert c.post("/api/runs", headers=h).status_code == 202

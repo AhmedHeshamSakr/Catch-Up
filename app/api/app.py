@@ -141,6 +141,28 @@ def _rate_limiter(bucket: TokenBucket):
     return dep
 
 
+def _require_same_origin_when_open(settings: Settings):
+    """Block cross-origin browser mutations when the API is OPEN (no api_key).
+
+    No-op when ``api_key`` is set (the key is the control and CORS governs the
+    browser). When open (local/dev), a request that carries an ``Origin``/
+    ``Referer`` (i.e. a browser) must have a loopback or allow-listed origin —
+    so a malicious web page can't drive ``POST /api/runs`` against a local
+    instance (CSRF). Requests without an Origin/Referer (CLI, server-to-server)
+    pass: CSRF is a browser-only attack and they carry no ambient credential.
+    """
+    allowed_hosts = {_hostname(o) for o in settings.allow_origins} | _LOOPBACK_HOSTS
+
+    def dep(request: Request) -> None:
+        if settings.api_key:
+            return
+        ref = request.headers.get("origin") or request.headers.get("referer")
+        if ref and _hostname(ref) not in allowed_hosts:
+            raise HTTPException(status_code=403, detail="cross-origin request blocked")
+
+    return dep
+
+
 def register_product_routes(
     app: FastAPI,
     settings: Settings,
@@ -167,6 +189,7 @@ def register_product_routes(
     )
     require_api_key = Depends(_require_api_key(settings))
     rate_limit = Depends(_rate_limiter(rate_bucket))
+    require_same_origin = Depends(_require_same_origin_when_open(settings))
 
     if not settings.api_key:
         logger.warning(
@@ -276,7 +299,7 @@ def register_product_routes(
     def get_sources():
         return load_sources(settings.config_dir)
 
-    @api.put("/sources", dependencies=[require_api_key])
+    @api.put("/sources", dependencies=[require_api_key, require_same_origin])
     def put_sources(sources: list[SourceConfig]):
         config_store.write_sources(settings.config_dir, sources)
         return {"status": "ok", "count": len(sources)}
@@ -285,12 +308,13 @@ def register_product_routes(
     def get_watchlist() -> Watchlist:
         return load_watchlist(settings.config_dir)
 
-    @api.put("/watchlist", dependencies=[require_api_key])
+    @api.put("/watchlist", dependencies=[require_api_key, require_same_origin])
     def put_watchlist(watchlist: Watchlist):
         config_store.write_watchlist(settings.config_dir, watchlist)
         return {"status": "ok"}
 
-    @api.post("/runs", status_code=202, dependencies=[require_api_key, rate_limit])
+    @api.post("/runs", status_code=202,
+              dependencies=[require_api_key, require_same_origin, rate_limit])
     def trigger_run():
         # Single-flight (shared with the scheduler via app.run_trigger): reject
         # with 409 if a run is already in progress so we don't fan out concurrent
@@ -301,7 +325,7 @@ def register_product_routes(
         return {"status": "started", "run_id": run_id}
 
     @api.post("/sources/resolve", response_model=ResolveOut,
-              dependencies=[require_api_key, rate_limit])
+              dependencies=[require_api_key, require_same_origin, rate_limit])
     def resolve_source(body: ResolveIn) -> ResolveOut:
         if body.type == "youtube":
             try:
