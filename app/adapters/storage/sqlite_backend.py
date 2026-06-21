@@ -54,6 +54,26 @@ class SqliteBackend(StorageBackend):
             # Migrate older databases that predate the query columns.
             self._ensure_columns(conn, "news_items", self._NEWS_COLUMNS)
             self._ensure_columns(conn, "digest_runs", self._RUN_COLUMNS)
+            # Backfill the query columns from the JSON blob for legacy rows.
+            # status + collected_at are ALWAYS set on rows written by this code, so
+            # a NULL there marks a pre-migration row — recover all four columns from
+            # `data` (json_extract returns the stored enum .value / ISO string, which
+            # is exactly what save_items writes). Without this, legacy rows are
+            # invisible to category/importance filters, mis-ordered by collected_at,
+            # and — worst — legacy `status='flagged'` rows LEAK into default reads.
+            conn.execute(
+                "UPDATE news_items SET "
+                "category = json_extract(data, '$.category'), "
+                "importance = json_extract(data, '$.importance'), "
+                "collected_at = json_extract(data, '$.collected_at'), "
+                "status = json_extract(data, '$.status') "
+                "WHERE status IS NULL OR collected_at IS NULL"
+            )
+            conn.execute(
+                "UPDATE digest_runs SET "
+                "started_at = json_extract(data, '$.started_at') "
+                "WHERE started_at IS NULL"
+            )
             for col in ("category", "importance", "collected_at", "run_id", "status"):
                 conn.execute(
                     f"CREATE INDEX IF NOT EXISTS idx_news_{col} ON news_items({col})"

@@ -112,11 +112,13 @@ class FirestoreBackend(StorageBackend):
         return [NewsItem.model_validate(s.to_dict()) for s in q.stream()]
 
     def backfill_is_flagged(self) -> int:
-        """One-time migration: set ``is_flagged=False`` on item docs missing it.
+        """One-time migration: set ``is_flagged`` on item docs missing it.
 
         Real Firestore's ``is_flagged == False`` filter does NOT match a missing
         field, so legacy docs written before the field existed would silently drop
-        out of default queries. Scan all item docs and set it where absent.
+        out of default queries. Scan all item docs and set it where absent, deriving
+        the value from the stored ``status`` (a flagged legacy doc must STAY hidden —
+        hardcoding ``False`` would un-flag it and leak it into default reads).
         Returns the number of docs updated. (New writes always set it; see
         ``_item_doc``.) Intended as a one-time migration on a quiescent
         collection — for very large collections, page by document id (a single
@@ -129,6 +131,8 @@ class FirestoreBackend(StorageBackend):
             if "is_flagged" not in data:
                 # update() merges ONLY this field — set({**data,...}) would rewrite
                 # the whole doc and could clobber a concurrent change.
-                col.document(snap.id).update({"is_flagged": False})
+                col.document(snap.id).update(
+                    {"is_flagged": data.get("status") == "flagged"}
+                )
                 updated += 1
         return updated
