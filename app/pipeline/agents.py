@@ -2,7 +2,9 @@
 
 Each wrapper is a thin BaseAgent subclass that reads state from
 ctx.session.state, calls the existing proven functions, and writes results
-back via EventActions.state_delta. No LLM calls — all orchestration only.
+back via EventActions.state_delta. The wrappers themselves are orchestration;
+the LLM-backed stages (Processing/GuardrailCritic/DigestEditor) invoke their
+injected callables off the event loop via ``asyncio.to_thread``.
 
 State-propagation: every cross-stage value travels via
 ``EventActions.state_delta`` as JSON-serializable data (run/items/raws as

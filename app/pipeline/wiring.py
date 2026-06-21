@@ -58,7 +58,10 @@ def _default_reprocessor(settings: Settings):
 
 
 def select_rendered(items: list[NewsItem]) -> list[NewsItem]:
-    """Select items to render: processed items, or all non-flagged if none processed."""
+    """Select items to render: processed items, or — if none are processed — any
+    that are neither flagged nor still ``raw``. Rendering ``raw`` items would ship
+    un-enriched content (missing/stale summaries) as if it were a real digest, so
+    a total enrichment failure yields an empty digest, not fabricated narration."""
     return [i for i in items if i.status == "processed"] or [
-        i for i in items if i.status != "flagged"
+        i for i in items if i.status not in ("flagged", "raw")
     ]

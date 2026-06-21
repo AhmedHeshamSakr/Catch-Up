@@ -801,12 +801,11 @@ async def test_digest_editor_none_narrative_when_no_rendered(tmp_path):
     )
     await _run(agent, state)
 
-    # filtered items → select_rendered falls back to non-flagged, which includes raw
-    # Actually "raw" != "flagged" so they ARE rendered — let's check:
-    # select_rendered: processed? no. non-flagged? yes (raw != flagged). → [item]
-    # Narrator IS called.
-    assert called  # narrator WAS called because item is non-flagged
-    assert run.narrative == "oops"
+    # A raw (un-enriched) item is NOT rendered: select_rendered excludes both
+    # flagged AND raw, so with no processed items it returns [] → the narrator is
+    # never called and no narrative is fabricated.
+    assert called == []
+    assert run.narrative is None
 
 
 @pytest.mark.asyncio
