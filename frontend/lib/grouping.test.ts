@@ -26,7 +26,6 @@ function makeItem(
     importance_score: score,
     entities: [],
     sentiment: null,
-    language: null,
     status: "ok",
     digest_run_id: null,
   };

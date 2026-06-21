@@ -149,7 +149,6 @@ class NewsItem(BaseModel):
     importance_score: float | None = None
     entities: list[Entity] = Field(default_factory=list)
     sentiment: Sentiment | None = None
-    language: str | None = None
     status: str = "raw"
     digest_run_id: str | None = None
 

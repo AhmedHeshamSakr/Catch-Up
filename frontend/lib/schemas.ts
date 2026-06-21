@@ -50,7 +50,6 @@ export const newsItemSchema = z.object({
   importance_score: z.number().nullable(),
   entities: z.array(entitySchema),
   sentiment: sentimentSchema.nullable(),
-  language: z.string().nullable(),
   status: z.string(),
   digest_run_id: z.string().nullable(),
   image_url: z.string().nullish(),

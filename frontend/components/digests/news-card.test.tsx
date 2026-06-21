@@ -27,7 +27,6 @@ function makeItem(overrides: Partial<NewsItem> = {}): NewsItem {
       { name: "Qatar", type: "place" },
     ],
     sentiment: "positive",
-    language: "en",
     status: "ok",
     digest_run_id: null,
     ...overrides,
