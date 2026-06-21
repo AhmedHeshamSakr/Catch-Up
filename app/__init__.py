@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .agent import app
-
-__all__ = ["app"]
+# No import-time side effects: the ADK App is built lazily in app.agent
+# (importing it eagerly here ran build_storage() -> created/migrated the SQLite
+# DB merely by importing any app.* submodule). ADK's AgentLoader imports
+# app.agent and reads its lazy `app`/`root_agent` attributes directly.
