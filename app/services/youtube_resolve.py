@@ -2,8 +2,15 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from urllib.parse import urlparse
 
 from app.services.net import safe_get
+
+# Full URLs are restricted to these hosts so this resolver can't be turned into
+# an arbitrary-public-URL fetcher via POST /api/sources/resolve.
+_YOUTUBE_HOSTS = frozenset(
+    {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
+)
 
 _HEADERS = {"User-Agent": "CatchUp/0.1 (+https://github.com/AhmedHeshamSakr/Catch-Up)"}
 
@@ -25,8 +32,15 @@ def _fetch(url: str) -> bytes:
 
 
 def _resolve_url(value: str) -> str:
-    """Convert a @handle or URL into the canonical YouTube channel page URL to fetch."""
+    """Convert a @handle or YouTube URL into the canonical channel page URL to fetch.
+
+    Full URLs are accepted ONLY for known YouTube hosts; anything else raises so
+    this can't be abused as an arbitrary-URL fetcher.
+    """
     if value.startswith("http://") or value.startswith("https://"):
+        host = (urlparse(value).hostname or "").lower()
+        if host not in _YOUTUBE_HOSTS:
+            raise ValueError(f"not a YouTube URL host: {host!r}")
         return value
     # @handle or bare handle
     handle = value.lstrip("@")

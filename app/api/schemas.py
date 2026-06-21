@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.domain import DigestRun, NewsItem
 
@@ -20,8 +20,8 @@ class RunDetail(BaseModel):
 
 
 class ResolveIn(BaseModel):
-    type: str
-    url: str
+    type: str = Field(max_length=32)
+    url: str = Field(max_length=2048)
 
     @field_validator("url")
     @classmethod

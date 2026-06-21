@@ -59,6 +59,11 @@ def validate_public_url(
         raise UnsafeURLError(f"no addresses resolved for host: {host}")
     for addr in addresses:
         ip = ipaddress.ip_address(addr)
+        # Normalize an IPv4-mapped IPv6 (::ffff:a.b.c.d) to its IPv4 form so the
+        # checks below see the real address, not the mapped wrapper.
+        mapped = getattr(ip, "ipv4_mapped", None)
+        if mapped is not None:
+            ip = mapped
         if (
             ip.is_private
             or ip.is_loopback
@@ -66,6 +71,9 @@ def validate_public_url(
             or ip.is_reserved
             or ip.is_multicast
             or ip.is_unspecified
+            # is_global is the catch-all: it also rejects non-global ranges the
+            # explicit flags miss, notably CGNAT (100.64.0.0/10).
+            or not ip.is_global
         ):
             raise UnsafeURLError(f"{host} resolves to non-public address {ip}")
     return url, addresses[0]

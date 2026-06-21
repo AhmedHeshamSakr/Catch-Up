@@ -7,10 +7,12 @@ import os
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 from urllib.parse import urlsplit
 
 from fastapi import (
     APIRouter,
+    Body,
     Depends,
     FastAPI,
     Header,
@@ -53,6 +55,20 @@ except importlib.metadata.PackageNotFoundError:  # pragma: no cover
 # Loopback identities for the Settings write guard.
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 _LOOPBACK_IPS = {"127.0.0.1", "::1"}
+
+# Hard cap on items returned for a single run detail (a run is naturally bounded;
+# never return an unbounded list).
+_RUN_ITEMS_CAP = 5000
+
+
+def _loggable_url(url: str) -> str:
+    """scheme://host only — never log a full URL (it can carry credentials,
+    tokens, or private query params)."""
+    try:
+        parts = urlsplit(url)
+        return f"{parts.scheme}://{parts.hostname}" if parts.hostname else "<unparseable>"
+    except ValueError:
+        return "<unparseable>"
 
 
 def _hostname(value: str) -> str:
@@ -124,8 +140,12 @@ def _require_api_key(settings: Settings):
         if not settings.api_key:
             return  # open when unset (local/dev)
         supplied = x_api_key or (authorization or "").removeprefix("Bearer ").strip()
-        # Constant-time compare to avoid leaking the key via response timing.
-        if not hmac.compare_digest(supplied, settings.api_key):
+        # Constant-time compare. Encode to bytes so a non-ASCII header byte
+        # (Starlette decodes headers as latin-1) yields a clean 401, not a 500
+        # from compare_digest raising TypeError on a non-ASCII str.
+        if not hmac.compare_digest(
+            supplied.encode("utf-8"), settings.api_key.encode("utf-8")
+        ):
             raise HTTPException(status_code=401, detail="invalid or missing API key")
 
     return dep
@@ -208,9 +228,11 @@ def register_product_routes(
     def health() -> dict[str, str]:
         return {"status": "ok", "app": APP_MARKER, "version": APP_VERSION}
 
-    # Local desktop Settings surface. Local-only (no api_key needed): the write
-    # guard restricts both routes to loopback/same-origin callers.
-    @api.get("/settings", dependencies=[require_local])
+    # Local desktop Settings surface. The write guard restricts both routes to
+    # loopback/same-origin callers; we ALSO require the API key when one is set
+    # (no-op locally) so a forged proxy header can't reach this secret writer
+    # keyless on a network-exposed deploy.
+    @api.get("/settings", dependencies=[require_local, require_api_key])
     def get_settings() -> dict[str, object]:
         # Non-secret only: the key value is NEVER returned, just whether one is set.
         # shadowed_keys warns the UI when a root .env overrides app/.env so a save
@@ -222,7 +244,7 @@ def register_product_routes(
             "shadowed_keys": detect_env_shadow(REPO_ROOT),
         }
 
-    @api.put("/settings", dependencies=[require_local])
+    @api.put("/settings", dependencies=[require_local, require_api_key])
     def put_settings(body: SettingsPatch) -> dict[str, list[str]]:
         # python-dotenv interpolates ${VAR}/$VAR on load regardless of quoting, so a
         # '$' in the stored key would corrupt it on the next launch — reject it.
@@ -275,7 +297,7 @@ def register_product_routes(
     @api.get("/runs", dependencies=[require_api_key])
     def list_runs(
         limit: int = Query(50, ge=1, le=200),
-        offset: int = Query(0, ge=0),
+        offset: int = Query(0, ge=0, le=100_000),
     ):
         return storage().list_runs(limit=limit, offset=offset)
 
@@ -285,12 +307,12 @@ def register_product_routes(
         run = st.get_run(run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="run not found")
-        return RunDetail(run=run, items=st.get_items_for_run(run_id))
+        return RunDetail(run=run, items=st.get_items_for_run(run_id)[:_RUN_ITEMS_CAP])
 
     @api.get("/news", dependencies=[require_api_key])
     def list_news(category: Category | None = None, importance: Importance | None = None,
                   limit: int = Query(50, ge=1, le=200),
-                  offset: int = Query(0, ge=0)):
+                  offset: int = Query(0, ge=0, le=100_000)):
         return storage().list_news(
             category=category, importance=importance, limit=limit, offset=offset
         )
@@ -300,7 +322,7 @@ def register_product_routes(
         return load_sources(settings.config_dir)
 
     @api.put("/sources", dependencies=[require_api_key, require_same_origin])
-    def put_sources(sources: list[SourceConfig]):
+    def put_sources(sources: Annotated[list[SourceConfig], Body(max_length=1000)]):
         config_store.write_sources(settings.config_dir, sources)
         return {"status": "ok", "count": len(sources)}
 
@@ -335,7 +357,7 @@ def register_product_routes(
             except Exception as exc:
                 # Log the real cause server-side; return a generic message so we
                 # don't leak internals (e.g. SSRF target addresses) to clients.
-                logger.warning("youtube resolve failed for %r: %s", body.url, exc)
+                logger.warning("youtube resolve failed for %s: %s", _loggable_url(body.url), exc)
                 raise HTTPException(status_code=400, detail="could not resolve source") from exc
             if not cid:
                 raise HTTPException(status_code=422, detail="Could not resolve a YouTube channel from that link")
@@ -346,7 +368,7 @@ def register_product_routes(
             except HTTPException:
                 raise
             except Exception as exc:
-                logger.warning("rss discover failed for %r: %s", body.url, exc)
+                logger.warning("rss discover failed for %s: %s", _loggable_url(body.url), exc)
                 raise HTTPException(status_code=400, detail="could not resolve source") from exc
             if not feed:
                 raise HTTPException(status_code=422, detail="No RSS feed found at that URL")

@@ -25,6 +25,19 @@ def test_rejects_loopback_and_private():
             validate_public_url("http://internal.example", resolver=_resolver([ip]))
 
 
+def test_rejects_non_global_cgnat():
+    """100.64.0.0/10 (CGNAT) is not private/loopback but is NOT globally routable —
+    the is_global check must reject it."""
+    with pytest.raises(UnsafeURLError):
+        validate_public_url("http://internal.example", resolver=_resolver(["100.64.0.1"]))
+
+
+def test_rejects_ipv4_mapped_ipv6_private():
+    """An IPv4-mapped IPv6 (::ffff:10.0.0.1) must be normalized + rejected."""
+    with pytest.raises(UnsafeURLError):
+        validate_public_url("http://internal.example", resolver=_resolver(["::ffff:10.0.0.1"]))
+
+
 def test_allows_public_host_and_returns_pinned_ip():
     url, ip = validate_public_url(
         "https://news.example.com/feed", resolver=_resolver(["93.184.216.34"])
