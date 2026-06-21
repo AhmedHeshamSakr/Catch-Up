@@ -1,0 +1,28 @@
+# Docker does NOT honor .gitignore — keep host build artifacts out of the build
+# context so `COPY frontend/ ./` can't clobber the image's fresh `npm ci`, and so
+# secrets/data never enter an image layer.
+.git/
+**/__pycache__/
+**/*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.run/
+data/
+output/
+logs/
+*.sqlite
+*.sqlite3
+*.db
+.superpowers/
+.claude/
+presentation/
+**/.DS_Store
+
+# Frontend: the image builds these itself; never copy host copies in.
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env
+frontend/.env.*

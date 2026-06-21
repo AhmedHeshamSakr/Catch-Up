@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -46,6 +47,7 @@ def _firestore_client(settings: Settings):
 # calls build_storage() on every request, and constructing a real
 # firestore.Client each time is expensive. SQLite stays per-call (cheap).
 _firestore_cache: dict[tuple[str, str], StorageBackend] = {}
+_firestore_cache_lock = threading.Lock()
 
 
 def build_storage(settings: Settings) -> StorageBackend:
@@ -58,10 +60,13 @@ def build_storage(settings: Settings) -> StorageBackend:
         key = ("firestore", settings.google_cloud_project)
         cached = _firestore_cache.get(key)
         if cached is None:
-            from app.adapters.storage.firestore_backend import FirestoreBackend
-            cached = FirestoreBackend(_firestore_client(settings))
-            cached.init_schema()
-            _firestore_cache[key] = cached
+            with _firestore_cache_lock:  # double-checked: avoid a concurrent double-build
+                cached = _firestore_cache.get(key)
+                if cached is None:
+                    from app.adapters.storage.firestore_backend import FirestoreBackend
+                    cached = FirestoreBackend(_firestore_client(settings))
+                    cached.init_schema()
+                    _firestore_cache[key] = cached
         return cached
     raise ValueError(f"unknown storage_backend: {backend!r}")
 

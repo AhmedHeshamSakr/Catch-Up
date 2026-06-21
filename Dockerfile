@@ -23,8 +23,14 @@ WORKDIR /console
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
-# Same-origin: the static console calls /api on whatever host serves it.
-ENV NEXT_PUBLIC_API_BASE=""
+# The console is a STATIC export, so its API key is baked at build time. Pass it
+# as --build-arg NEXT_PUBLIC_API_KEY=<key>; it WILL be visible in the browser
+# bundle, which is acceptable ONLY because the product image runs behind Cloud
+# Run IAM/IAP (the real perimeter) — the key is a secondary guard. NEXT_PUBLIC_API_BASE
+# stays empty so the console calls /api same-origin.
+ARG NEXT_PUBLIC_API_KEY=""
+ENV NEXT_PUBLIC_API_BASE="" \
+    NEXT_PUBLIC_API_KEY=${NEXT_PUBLIC_API_KEY}
 RUN npm run build
 
 # ---- Stage 2: the Python product app ----

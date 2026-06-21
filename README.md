@@ -126,7 +126,7 @@ ADK-CATCH-UP-Agent/
 ├── tests/                     # unit · integration · eval  (all run fully offline)
 ├── docs/                      # ADK-GUIDE, eval guide, design specs, build log
 ├── ARCHITECTURE.md            # illustrated layer + pipeline diagrams
-├── Dockerfile                 # container image for Cloud Run / Agent Engine
+├── Dockerfile                 # Cloud Run product image (console + API via app.web_app)
 ├── pyproject.toml             # Python deps + the `catchup` entry point (uv)
 └── agents-cli-manifest.yaml   # google-agents-cli scaffold manifest
 ```
@@ -273,11 +273,22 @@ set **`API_KEY`** (the image fails closed without it) and `ALLOW_ORIGINS`. Optio
 `STORAGE_BACKEND=firestore` (the image installs the `[firestore]` extra — deploy
 `firestore.indexes.json` first via `gcloud firestore indexes composite create` /
 `firebase deploy --only firestore:indexes`) and `USE_VERTEXAI=true` for Vertex.
-Scheduled runs: point **Cloud Scheduler at `POST /api/runs`** (with the API key).
+Scheduled runs: point **Cloud Scheduler at `POST /api/runs`** (sending the API key).
+
+The console is a static export, so it authenticates with the **same** key **baked
+at build time** (`--build-arg NEXT_PUBLIC_API_KEY`). That key is visible in the
+browser bundle, so the product image **must run behind Cloud Run IAM / IAP** — that
+authenticated perimeter is the real user auth; the app `API_KEY` is a secondary
+guard (and what Cloud Scheduler sends). Build with the key, then deploy requiring
+authentication:
 
 ```bash
-gcloud run deploy catch-up --source . \
-  --set-env-vars API_KEY=...,ALLOW_ORIGINS=https://your-console
+KEY=$(openssl rand -hex 24)
+docker build --build-arg NEXT_PUBLIC_API_KEY="$KEY" -t gcr.io/$PROJECT/catch-up .
+docker push gcr.io/$PROJECT/catch-up
+gcloud run deploy catch-up --image gcr.io/$PROJECT/catch-up \
+  --no-allow-unauthenticated \
+  --set-env-vars API_KEY="$KEY",ALLOW_ORIGINS=https://your-console
 ```
 
 ### 3. ADK Agent Engine (`agents-cli deploy`)

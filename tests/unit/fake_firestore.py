@@ -28,6 +28,12 @@ class FakeDocRef:
     def set(self, data: dict) -> None:
         self._store[self.id] = copy.deepcopy(data)
 
+    def update(self, data: dict) -> None:
+        doc = self._store.get(self.id)
+        if doc is None:
+            raise KeyError(self.id)  # update() requires an existing document
+        doc.update(copy.deepcopy(data))
+
     def get(self) -> FakeSnapshot:
         return FakeSnapshot(self.id, self._store.get(self.id))
 

@@ -118,13 +118,17 @@ class FirestoreBackend(StorageBackend):
         field, so legacy docs written before the field existed would silently drop
         out of default queries. Scan all item docs and set it where absent.
         Returns the number of docs updated. (New writes always set it; see
-        ``_item_doc``.)
+        ``_item_doc``.) Intended as a one-time migration on a quiescent
+        collection — for very large collections, page by document id (a single
+        ``stream()`` has an RPC time limit).
         """
         col = self._items()
         updated = 0
         for snap in col.stream():
             data = snap.to_dict() or {}
             if "is_flagged" not in data:
-                col.document(snap.id).set({**data, "is_flagged": False})
+                # update() merges ONLY this field — set({**data,...}) would rewrite
+                # the whole doc and could clobber a concurrent change.
+                col.document(snap.id).update({"is_flagged": False})
                 updated += 1
         return updated
