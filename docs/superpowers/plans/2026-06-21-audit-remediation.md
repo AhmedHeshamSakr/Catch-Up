@@ -722,7 +722,19 @@ def __getattr__(name: str):
 - **Placeholder scan:** code blocks are real; the few "enumerate/grep then implement" steps are mechanical and bounded.
 - **Type consistency:** `require_api_key_for_nonlocal(settings, bind_host)`, `safe_get(..., max_bytes=...)`, `app/pipeline/wiring.py` exports, `app/web_app.py:app` are referenced consistently across tasks.
 
-## Open decisions for the plan reviewer (Codex)
-1. **Output-key fix direction** (Task 1.3): change the frontend to `md/xlsx/html` (chosen) vs change the backend to `markdown/excel/html`. Backend keys are already in persisted DBs → frontend change is safer. Confirm.
-2. **Drop vs keep `org_id` SQLite columns** (Task 4.5): keep the physical columns (write NULL) to avoid a table rebuild migration, vs full column drop. Plan keeps them. Confirm acceptable.
-3. **Emulator in CI** (Task 2.5): run the emulator in CI vs leave it as a `skipif` local pre-deploy gate. Plan makes it `skipif` + optional CI job. Confirm.
+## Codex plan-review — resolved corrections (incorporated)
+
+Codex pre-execution review (`.claude/codex-reviews/20260621T190755Z-remediation-plan-review.md`) read the live code and returned "do not execute as written" until these are addressed. All are now folded in:
+
+**Decisions (all confirmed by Codex):**
+1. **Output keys** (Task 1.3): change the frontend to `md/xlsx/html` — backend + existing DB rows already use those keys. ✅ chosen.
+2. **SQLite tenancy columns** (Task 4.5): keep the old physical columns, **omit `org_id` from the new DDL AND from the INSERT column lists entirely** — do NOT "write NULL by naming the column". Old + new schemas both work; no table rebuild. ✅
+3. **Firestore emulator in CI** (Task 2.5): `skipif` is acceptable ONLY if docs label Firestore as pre-deploy-validated, not continuously enforced; otherwise run the emulator in a CI job. Plan: `skipif` + a separate/optional emulator CI job; README states the status honestly. ✅
+
+**Corrections to apply during execution:**
+- **Task 0.3/3.1 (Cloud Run auth hole):** `create_app`'s guard on `settings.app_host` does NOT cover Cloud Run, where uvicorn binds `--host 0.0.0.0` externally while `app_host` stays `127.0.0.1`. → **Phase 3 `app/web_app.py` MUST explicitly require `API_KEY`** (not rely on create_app's app_host guard). *(Already done for `catchup serve` via the CLI `--host` guard and for `fast_api_app` via its import guard.)*
+- **Task 1.2 (cycle):** `app/pipeline/wiring.py` must **not** import `runner` or `build_storage` (remove the "may import lazily" note). `build_storage` stays in `runner.py`. **Preserve monkeypatch targets:** tests patch `app.pipeline.agents._collect`, `runner.rss`, `runner.markdown` (see `tests/integration/test_run_digest.py:115`, `tests/integration/test_run_digest_database_session.py:47`) — re-export the underscore aliases so existing patches keep working, or update the patch targets in the same task.
+- **Task 2.1 (FieldFilter):** default CI runs WITHOUT the `[firestore]` extra, so production code must not unconditionally construct `FieldFilter` in fake-backed unit tests. Implement `_where()` with a `try: from google.cloud.firestore_v1.base_query import FieldFilter / except ImportError` fallback to positional (for the fake), OR install `--extra firestore` in the backend CI job. Plan: `_where()` fallback + fake supports `where(filter=...)`.
+- **Task 2.4 (is_flagged backfill):** make it concrete — scan documents, batch-update those missing `is_flagged`, and emulator-test it (not just a doc note).
+- **fast_api_app guard order:** ✅ already fixed (key guard moved above GCP auth/logging).
+- **Gap — docs/ADK-GUIDE.md:** add a Phase 5 task to update it (it still documents eager `app = App(...)` and `build_pipeline(..., run_id=...)`, both removed in Phase 1).
